@@ -1,0 +1,14 @@
+**/.vscode
+**/.vs
+**/.venv
+**/.env
+**/client.log
+**/server_*.log
+**/experimental
+**/downloads/*
+**/scripts
+**/legacy
+**/node_modules
+**/package-lock.json
+**/.ninja_log
+**/out
