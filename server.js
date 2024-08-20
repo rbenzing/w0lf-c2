@@ -38,6 +38,7 @@ const _VERSION = '0.2.0';
 const CHUNK_SIZE = 1024;
 const PORT = 54678;
 const LOGGING = true;
+const LOGS_FOLDER = join(__dirname, 'logs');
 const DOWNLOADS_FOLDER = join(__dirname, 'downloads');
 const PLUGINS_FOLDER = join(__dirname, 'plugins');
 const MAX_LOG_LINES = 20000;
@@ -60,15 +61,18 @@ let currentLineCount = 0; // current log line count
 //  ------------------------------------- LOGGING -------------------------------------
 
 // Create a writable stream for logging
-const createLogStream = (index) => {
+const createLogStream = async (index) => {
     if (LOGGING) {
+        if (!existsSync(LOGS_FOLDER)) {
+            await mkdir_promise(LOGS_FOLDER);
+        }
         const logFilePath = join('logs', `server_${index}.log`);
         return createWriteStream(logFilePath, { flags: 'a' });
     }
     return null;
 };
 
-const log = (texts, colors = 97) => {
+const log = async (texts, colors = 97) => {
     // Ensure texts and colors are arrays
     texts = Array.isArray(texts) ? texts : [texts];
     colors = Array.isArray(colors) ? colors : [colors];
@@ -87,7 +91,8 @@ const log = (texts, colors = 97) => {
         if (currentLineCount >= MAX_LOG_LINES) {
             logStream.end();
             logFileIndex++;
-            logStream = createLogStream(logFileIndex);
+            logStream = await createLogStream(logFileIndex);
+            
             currentLineCount = 0;
         }
 
@@ -857,7 +862,7 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, async () => {
-    logStream = createLogStream(logFileIndex);
+    logStream = await createLogStream(logFileIndex);
     getHowel();
     getStartup();
     await loadAndRegisterPlugins();
