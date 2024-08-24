@@ -12,9 +12,9 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "libssl.lib")
-#pragma comment(lib, "libcrypto.lib")
+// #pragma comment(lib, "ws2_32.lib")
+// #pragma comment(lib, "libssl.lib")
+// #pragma comment(lib, "libcrypto.lib")
 
 #define SALT_SIZE 32
 #define IV_SIZE 12
