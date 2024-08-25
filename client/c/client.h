@@ -4,22 +4,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <tchar.h>
 #include <time.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <openssl/sha.h>
+#include <openssl/hmac.h>
+#include <openssl/buffer.h>
+#include <openssl/err.h>
 
 // #pragma comment(lib, "ws2_32.lib")
 // #pragma comment(lib, "libssl.lib")
 // #pragma comment(lib, "libcrypto.lib")
 
-#define SALT_SIZE 32
-#define IV_SIZE 12
-#define KEY_SIZE 32
-#define TAG_SIZE 16
+#define KEY_LENGTH 32
+#define IV_LENGTH 12
+#define SALT_LENGTH 32
+#define TAG_LENGTH 16
 #define CHUNK_SIZE 1024
 
 // Globals
@@ -49,6 +53,8 @@ FILE* log_file = NULL;
 // Function prototypes
 void log_it(const char* message);
 char* get_session_id(const char* ip_address);
+unsigned char* base64_decode(const char *data, size_t *length);
+char* base64_encode(const unsigned char *data, size_t length);
 char* encrypt_data(const char* data, const char* shared_key);
 char* decrypt_data(const char* encrypted, const char* shared_key);
 void send_command(const char* response);

@@ -4,7 +4,7 @@ import cv2
 import random
 from platform import system, machine, version
 from hashlib import sha256
-from os import remove
+from os import remove, path, makedirs
 from time import time, sleep
 from json import dumps
 from base64 import b64decode, b64encode
@@ -46,7 +46,12 @@ BEACON_MAX_INTERVAL = 45 * 60 * 1000  # 45 minutes
 
 # Configure logging
 if LOGGING:
-    log_stream = open('logs/client.log', 'a')
+    log_dir = 'logs'
+    # Check if the logs directory exists, if not, create it
+    if not path.exists(log_dir):
+        makedirs(log_dir)
+    
+    log_stream = open(path.join(log_dir, 'client.log'), 'a')
 
 def log_it(message):
     if LOGGING and log_stream:
