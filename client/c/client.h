@@ -10,6 +10,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <wincodec.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
@@ -20,6 +21,9 @@
 // #pragma comment(lib, "ws2_32.lib")
 // #pragma comment(lib, "libssl.lib")
 // #pragma comment(lib, "libcrypto.lib")
+// #pragma comment(lib, "ole32.lib")
+// #pragma comment(lib, "oleaut32.lib")
+// #pragma comment(lib, "gdiplus.lib")
 
 #define KEY_LENGTH 32
 #define IV_LENGTH 12

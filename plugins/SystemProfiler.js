@@ -55,7 +55,7 @@ module.exports = {
         drives: {
             name: 'drives',
             method: 'payload-ps',
-            description: `Get the list of drives mounted on the client.`,
+            description: `Returns the list of drives mounted on the client.`,
             handler: (props) => {
                 return `R2V0LVBTRHJpdmUgLVBTUHJvdmlkZXIgRmlsZVN5c3RlbSB8IFNlbGVjdC1PYmplY3QgTmFtZSwgQHtOYW1lPSdQYXRoJzsgRXhwcmVzc2lvbj17JF8uUm9vdH19`;
             }

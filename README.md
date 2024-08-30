@@ -26,7 +26,7 @@ This repository serves as a Education reference and contains the implementation 
 
 ## Features
 
-- Client was built on six diffent languages (c, cpp, rust, powershell, python, js)
+- Client was built on five diffent languages (c, rust, powershell, python, js)
 - Multiple client session management
 - Extended features through plugins.
 - Server and client logging
@@ -40,7 +40,6 @@ This repository serves as a Education reference and contains the implementation 
 
 ## In The Works
 
-- View Firewall Rules (wmic firewall get Name,Status)
 - View installed Software (wmic product get Name,Version,Vendor)
 - View all users (wmic useraccount get Name,FullName,Status)
 - Additional communication channels (https, http2, web socket, udp dgram)

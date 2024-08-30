@@ -717,20 +717,21 @@ const sendClientCommand = async (command, args) => {
  * Closes the server connection
  */
 const closeServer = () => {
-    if (rl) {
-        rl.close();
-        logSuccess(`Console has been closed.`);
-    }
     for (const [sessionId, client] of activeClients) {
         client.socket.destroy();
         logSuccess(`Client connection ${sessionId} has been closed.`);
     }
-    // close server
+    activeClientSessionID = null;
     server.close(() => {
         logInfo('\nServer connection closed');
+        if (rl) {
+            rl.close();
+            logSuccess(`Console has been closed.`);
+        }
         if (logStream) {
             // stop log stream
             logStream.end();
+            logSuccess(`LogStream has been closed.`);
         }
         process.exit(0);
     });
@@ -764,9 +765,6 @@ const startInputListener = () => {
             logError(`Error: ${error.message}`);
             rl.prompt();
         }
-    }).on('close', () => {
-        logError('Input handler closed unexpectedly. Server is shutting down.');
-        closeServer();
     });
 };
 
@@ -852,13 +850,7 @@ server = createServer((socket) => {
 
 server.on('error', (err) => {
     logError('\nServer threw an error:', err.message);
-    if (rl) {
-        rl.close();
-    }
-    if (logStream) {
-        logStream.end();
-    }
-    server.close();
+    closeServer();
 });
 
 server.listen(PORT, async () => {
