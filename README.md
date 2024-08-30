@@ -40,7 +40,6 @@ This repository serves as a Education reference and contains the implementation 
 
 ## In The Works
 
-- View Antivirus Info (wmic antivirusproduct get DisplayName,ProductState)
 - View Firewall Rules (wmic firewall get Name,Status)
 - View installed Software (wmic product get Name,Version,Vendor)
 - View all users (wmic useraccount get Name,FullName,Status)
