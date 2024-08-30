@@ -1,7 +1,7 @@
 // Register a plugin
 (function() {
     const FileManager = {
-        name: 'FileManager',
+        name: 'File Manager',
         type: 'client',
         description: 'A client plugin to manage and manipulate files and folders.',
         commands: {

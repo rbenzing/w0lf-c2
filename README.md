@@ -21,15 +21,22 @@ This repository serves as a Education reference and contains the implementation 
 2. **Installation**:
    ```bash
    git clone <repository_url>
-   cd c2
+   cd w0lf-c2
    npm install
+
 ## Features
 
-- Client management
-- File/Folder management
-- Registry management
-- Schedule tasks
-- System profiler tools
+- Six diffent languages of the client
+- Multiple client session management
+- Extended features through plugins.
+- Server and client logging
+- Plugins:
+   - Client Manager: A client plugin to manage the remote client.
+   - Cmd.exe Binaries: A client plugin that provides native cmd.exe commands.
+   - File Manager: A client plugin to manage and manipulate files and folders.
+   - System Profiling: A client plugin to profile the system.
+   - Living Off The Land Binaries: A client plugin that provides Windows LOLBin commands.
+   - Screensaver: A server plugin to show a couple screensavers.
 
 ## In The Works
 

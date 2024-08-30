@@ -1,6 +1,6 @@
 // Register a plugin
 module.exports = {
-    name: 'LOLBins',
+    name: 'Living Off The Land Binaries',
     type: 'client',
     description: 'A client plugin that provides Windows LOLBin commands.',
     commands: {

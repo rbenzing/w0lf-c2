@@ -1,6 +1,6 @@
 // Register a plugin
 module.exports = {
-    name: 'SytemProfiler',
+    name: 'System Profiling',
     type: 'client',
     description: 'A client plugin to profile the system.',
     commands: {
