@@ -4,7 +4,7 @@ module.exports = {
     type: 'server',
     description: 'A server plugin to show a couple screensavers.',
     commands: {
-        'matrix': {
+        matrix: {
           name: 'matrix',
           method: 'execute',
           description: 'Shows the matrix style screensaver.',
@@ -116,7 +116,7 @@ module.exports = {
             });
           }                                                                                                                                                                                                                        
         },
-        'fire': {
+        fire: {
             name: 'fire',
             method: 'execute',
             description: 'Shows a fire screensaver.',

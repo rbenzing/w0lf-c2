@@ -5,7 +5,7 @@
         type: 'client',
         description: 'A client plugin that provides native cmd.exe commands.',
         commands: {
-            'reg': {
+            reg: {
                 name: 'reg',
                 method: 'payload-cmd',
                 description: `Send command reg.exe to manage the windows registry.`,
@@ -76,7 +76,7 @@
                     return Buffer.from(cmd).toString('base64');
                 }
             },
-            'ipconfig': {
+            ipconfig: {
                 name: 'ipconfig',
                 method: 'payload-cmd',
                 description: `Send ipconfig commands.`,
@@ -156,7 +156,7 @@
                     return Buffer.from(cmd).toString('base64');
                 }
             },
-            'schtasks': {
+            schtasks: {
                 name: 'schedule',
                 method: 'payload-cmd',
                 description: 'Schedule a recurring task.',
@@ -217,7 +217,7 @@
                     return Buffer.from(cmd).toString('base64');
                 }
             },
-            'systeminfo': {
+            systeminfo: {
                 name: 'systeminfo',
                 method: 'payload-cmd',
                 description: 'Returns the system information.',
@@ -226,7 +226,7 @@
                     return Buffer.from(`systeminfo`).toString('base64');
                 }
             },
-            'tasklist': {
+            tasklist: {
                 name: 'tasklist',
                 method: 'payload-cmd',
                 description: `Uses tasklist to return the running processes.`,
@@ -313,7 +313,7 @@
                     return Buffer.from(formattedCommand).toString('base64');
                 }
             },
-            'netsh': {
+            netsh: {
                 name: 'netsh',
                 method: 'payload-cmd',
                 description: `Uses netsh to return the network info.`,

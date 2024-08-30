@@ -26,7 +26,7 @@ This repository serves as a Education reference and contains the implementation 
 
 ## Features
 
-- Six diffent languages of the client
+- Client was built on six diffent languages (c, cpp, rust, powershell, python, js)
 - Multiple client session management
 - Extended features through plugins.
 - Server and client logging
