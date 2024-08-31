@@ -30,63 +30,59 @@ void log_it(const char* format, ...) {
     va_end(args);
 }
 
-void get_session_id(const char *ip_address, char *session_id) {
-    if (ip_address == NULL || session_id == NULL) {
+int get_session_id(const char *ip_address, char *session_id, size_t session_id_size) {
+    if (!ip_address || !session_id || session_id_size < SESSION_ID_LENGTH + 1) {
         log_it("Invalid input provided");
-        return;
+        return -1;
     }
 
-    // Copy the IP address to modify
-    char ip_copy[MAX_IP_LEN];
-    strncpy(ip_copy, ip_address, sizeof(ip_copy) - 1);
-    ip_copy[sizeof(ip_copy) - 1] = '\0';
+    char ip_copy[MAX_IP_LEN + 1];
+    snprintf(ip_copy, sizeof(ip_copy), "%s", ip_address);
 
-    // Remove server port from IP address if present
-    char port_str[8];  // Enough for ":8080" plus null terminator
-    snprintf(port_str, sizeof(port_str), ":%s", SERVER_PORT);
-    char *port_pos = strstr(ip_copy, port_str);
-    if (port_pos != NULL) {
-        *port_pos = '\0';  // Null-terminate the string at the start of the port
-    }
+    // Remove port if present
+    char *port_pos = strstr(ip_copy, ":" SERVER_PORT);
+    if (port_pos) *port_pos = '\0';
 
-    // Check for IPv6 localhost and replace with IPv4 localhost
+    // Handle IPv6 localhost
     if (strcmp(ip_copy, "::1") == 0) {
         strncpy(ip_copy, "127.0.0.1", sizeof(ip_copy) - 1);
+        ip_copy[sizeof(ip_copy) - 1] = '\0';
     }
 
-    // Calculate the sum of the IP address parts (only for IPv4)
+    // Calculate sum of IP parts for IPv4
     int sum = 0;
-    if (strchr(ip_copy, '.') != NULL) {  // Check if it's an IPv4 address
+    if (strchr(ip_copy, '.')) {
         char *token = strtok(ip_copy, ".");
         while (token != NULL) {
             sum += atoi(token);
             token = strtok(NULL, ".");
         }
-    } else {
-        sum = 0;  // Default sum for non-IPv4 addresses (like IPv6)
     }
 
-    log_it("Sum: %d", sum);
+    // Prepare hash input
+    char hash_input[MAX_IP_LEN + 13];  // Extra space for "<>" and sum
+    snprintf(hash_input, sizeof(hash_input), "%s<>%d", ip_address, sum);
 
-    // Create the string to hash
-    char hash_input[MAX_IP_LEN + 12];
-    snprintf(hash_input, sizeof(hash_input), "%s<>%d", ip_copy, sum);
-
-    // Compute SHA-256 hash
+    // Compute SHA256 hash
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256((unsigned char *)hash_input, strlen(hash_input), hash);
-
-    // Convert the hash to a hex string
-    for (int i = 0; i < SESSION_ID_LENGTH; i++) {
-        snprintf(&session_id[i * 2], 3, "%02x", hash[i]);
+    SHA256_CTX sha256;
+    if (!SHA256_Init(&sha256) || 
+        !SHA256_Update(&sha256, hash_input, strlen(hash_input)) || 
+        !SHA256_Final(hash, &sha256)) {
+        log_it("SHA256 computation failed");
+        return -1;
     }
 
-    session_id[SESSION_ID_LENGTH * 2] = '\0';  // Null-terminate the string
+    // Convert hash to hex and truncate to 32 characters
+    static const char hex_chars[] = "0123456789abcdef";
+    for (int i = 0; i < SESSION_ID_LENGTH / 2; i++) {
+        session_id[i * 2] = hex_chars[(hash[i] >> 4) & 0xF];
+        session_id[i * 2 + 1] = hex_chars[hash[i] & 0xF];
+    }
+    session_id[SESSION_ID_LENGTH] = '\0';
 
-    // Log the Session ID
-    char session_id_log[SESSION_ID_LENGTH * 2 + 20];
-    snprintf(session_id_log, sizeof(session_id_log), "Session ID: %s", session_id);
-    log_it("%s", session_id_log);
+    log_it("Session ID: %s", session_id);
+    return 0;
 }
 
 // Function to encode base64
@@ -858,7 +854,7 @@ int connect_to_server() {
     freeaddrinfo(result);
 
     if (client_socket == INVALID_SOCKET) {
-        log_it("Unable to connect to server after %d attempts", MAX_RETRIES);
+        log_it("Unable to connect to server after %d attempts.", MAX_RETRIES);
         WSACleanup();
         return -1;
     }
@@ -868,7 +864,11 @@ int connect_to_server() {
     setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
     // Generate and store session ID
-    get_session_id(IP_ADDRESS, SESSION_ID);
+    int sessionStatus = get_session_id(IP_ADDRESS, SESSION_ID, sizeof(SESSION_ID));
+    if (sessionStatus < 0) {
+        log_it("Unable to get a session ID.");
+        return -1;
+    }
 
     return 0;
 }
