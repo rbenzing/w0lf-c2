@@ -7,7 +7,7 @@ CC = gcc
 CFLAGS = -m64 -Wall -Wextra -O2
 
 # Libraries
-LIBS = -lws2_32 -lssl -lcrypto -ole32 -oleaut32 -gdiplus
+LIBS = -lws2_32 -lssl -lcrypto -lgdi32 -lole32 -loleaut32 -lwindowscodecs
 
 # Source files
 SRC = client.c
