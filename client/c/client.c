@@ -30,210 +30,149 @@ void log_it(const char* format, ...) {
     va_end(args);
 }
 
-void get_session_id(char* ip_address) {
-    if (ip_address == NULL) {
-        log_it("Invalid IP address provided");
+void get_session_id(const char *ip_address, char *session_id) {
+    if (ip_address == NULL || session_id == NULL) {
+        log_it("Invalid input provided");
         return;
     }
+
+    // Copy the IP address to modify
+    char ip_copy[MAX_IP_LEN];
+    strncpy(ip_copy, ip_address, sizeof(ip_copy) - 1);
+    ip_copy[sizeof(ip_copy) - 1] = '\0';
+
+    // Remove server port from IP address if present
+    char port_str[8];  // Enough for ":8080" plus null terminator
+    snprintf(port_str, sizeof(port_str), ":%s", SERVER_PORT);
+    char *port_pos = strstr(ip_copy, port_str);
+    if (port_pos != NULL) {
+        *port_pos = '\0';  // Null-terminate the string at the start of the port
+    }
+
+    // Check for IPv6 localhost and replace with IPv4 localhost
+    if (strcmp(ip_copy, "::1") == 0) {
+        strncpy(ip_copy, "127.0.0.1", sizeof(ip_copy) - 1);
+    }
+
+    // Calculate the sum of the IP address parts (only for IPv4)
     int sum = 0;
-    char* token = strtok(ip_address, ".");
-    while (token != NULL) {
-        sum += atoi(token);
-        token = strtok(NULL, ".");
+    if (strchr(ip_copy, '.') != NULL) {  // Check if it's an IPv4 address
+        char *token = strtok(ip_copy, ".");
+        while (token != NULL) {
+            sum += atoi(token);
+            token = strtok(NULL, ".");
+        }
+    } else {
+        sum = 0;  // Default sum for non-IPv4 addresses (like IPv6)
     }
-    char input[INET6_ADDRSTRLEN + 12];
-    snprintf(input, sizeof(input), "%s<>%d", ip_address, sum);
+
+    log_it("Sum: %d", sum);
+
+    // Create the string to hash
+    char hash_input[MAX_IP_LEN + 12];
+    snprintf(hash_input, sizeof(hash_input), "%s<>%d", ip_copy, sum);
+
+    // Compute SHA-256 hash
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256((unsigned char*)input, strlen(input), hash);
-    for (int i = 0; i < SESSION_ID_LENGTH / 2; i++) {
-        snprintf(&SESSION_ID[i * 2], 3, "%02x", hash[i]);
+    SHA256((unsigned char *)hash_input, strlen(hash_input), hash);
+
+    // Convert the hash to a hex string
+    for (int i = 0; i < SESSION_ID_LENGTH; i++) {
+        snprintf(&session_id[i * 2], 3, "%02x", hash[i]);
     }
-    SESSION_ID[SESSION_ID_LENGTH] = '\0';  // Null-terminate the string
-    log_it("Session ID: %s", SESSION_ID);  // Log the Session ID
-}
 
-size_t b64_encoded_size(size_t inlen) {
-	size_t ret;
-	ret = inlen;
-	if (inlen % 3 != 0)
-		ret += 3 - (inlen % 3);
-	ret /= 3;
-	ret *= 4;
-	return ret;
-}
+    session_id[SESSION_ID_LENGTH * 2] = '\0';  // Null-terminate the string
 
-size_t b64_decoded_size(const char *in)
-{
-	size_t len;
-	size_t ret;
-	size_t i;
-	if (in == NULL)
-		return 0;
-	len = strlen(in);
-	ret = len / 4 * 3;
-	for (i=len; i-->0; ) {
-		if (in[i] == '=') {
-			ret--;
-		} else {
-			break;
-		}
-	}
-	return ret;
-}
-
-void b64_generate_decode_table() {
-	int    inv[80];
-	size_t i;
-	memset(inv, -1, sizeof(inv));
-	for (i=0; i<sizeof(base64_chars)-1; i++) {
-		inv[base64_chars[i]-43] = i;
-	}
-}
-
-int b64_isvalidchar(char c) {
-	if (c >= '0' && c <= '9')
-		return 1;
-	if (c >= 'A' && c <= 'Z')
-		return 1;
-	if (c >= 'a' && c <= 'z')
-		return 1;
-	if (c == '+' || c == '/' || c == '=')
-		return 1;
-	return 0;
+    // Log the Session ID
+    char session_id_log[SESSION_ID_LENGTH * 2 + 20];
+    snprintf(session_id_log, sizeof(session_id_log), "Session ID: %s", session_id);
+    log_it("%s", session_id_log);
 }
 
 // Function to encode base64
-char *base64_encode(const unsigned char *in, size_t len) {
-    char *out;
-    size_t elen;
-    size_t i, j, v;
+char* base64_encode(const unsigned char *data, size_t length) {
+    BIO *bio, *b64;
+    BUF_MEM *buffer_ptr;
+    char *buffer;
 
-    if (in == NULL || len == 0)
-        return NULL;
+    b64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL); // No newlines
+    bio = BIO_new(BIO_s_mem());
+    bio = BIO_push(b64, bio);
+    BIO_write(bio, data, length);
+    BIO_flush(bio);
+    BIO_get_mem_ptr(bio, &buffer_ptr);
 
-    elen = b64_encoded_size(len);
-    out = malloc(elen + 1);  // Allocate memory for encoded string
-    if (out == NULL) return NULL;  // Check for allocation failure
+    buffer = (char *)malloc(buffer_ptr->length + 1); // +1 for null-terminator
+    memcpy(buffer, buffer_ptr->data, buffer_ptr->length);
+    buffer[buffer_ptr->length] = '\0';
 
-    out[elen] = '\0';  // Null-terminate the string
-
-    for (i = 0, j = 0; i < len; i += 3, j += 4) {
-        v = in[i];
-        v = (i + 1 < len) ? (v << 8 | in[i + 1]) : (v << 8);
-        v = (i + 2 < len) ? (v << 8 | in[i + 2]) : (v << 8);
-
-        out[j]   = base64_chars[(v >> 18) & 0x3F];
-        out[j+1] = base64_chars[(v >> 12) & 0x3F];
-        out[j+2] = (i + 1 < len) ? base64_chars[(v >> 6) & 0x3F] : '=';
-        out[j+3] = (i + 2 < len) ? base64_chars[v & 0x3F] : '=';
-    }
-
-    return out;
+    BIO_free_all(bio);
+    return buffer;
 }
 
-// Function to decode a Base64 encoded string into binary data
-int base64_decode(const char *in, unsigned char *out, size_t outlen) {
-    size_t len;
-    size_t i, j;
-    int v;
-    
-    if (in == NULL || out == NULL)
-        return 0;
+// Function to decode base64
+unsigned char* base64_decode(const char *data, size_t *length) {
+    BIO *bio, *b64;
+    size_t len = strlen(data);
+    unsigned char *buffer;
 
-    len = strlen(in);
-    if (outlen < b64_decoded_size(in) || len % 4 != 0)
-        return 0;
+    buffer = (unsigned char *)malloc(len * 3 / 4 + 1);
 
-    for (i = 0; i < len; i++) {
-        if (!b64_isvalidchar(in[i])) {
-            return 0;
-        }
-    }
+    b64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL); // No newlines
+    bio = BIO_new_mem_buf(data, len);
+    bio = BIO_push(b64, bio);
 
-    for (i = 0, j = 0; i < len; i += 4, j += 3) {
-        v = base64_invs[in[i] - 43];
-        v = (v << 6) | base64_invs[in[i+1] - 43];
-        v = (in[i+2] == '=') ? (v << 6) : (v << 6) | base64_invs[in[i+2] - 43];
-        v = (in[i+3] == '=') ? (v << 6) : (v << 6) | base64_invs[in[i+3] - 43];
+    *length = BIO_read(bio, buffer, len);
+    buffer[*length] = '\0';
 
-        out[j] = (v >> 16) & 0xFF;
-        if (in[i+2] != '=')
-            out[j+1] = (v >> 8) & 0xFF;
-        if (in[i+3] != '=')
-            out[j+2] = v & 0xFF;
-    }
+    BIO_free_all(bio);
+    return buffer;
+}
 
-    return 1;
+// Function to derive key using PBKDF2
+void derive_key(const unsigned char *shared_key, unsigned char *salt, unsigned char *key) {
+    PKCS5_PBKDF2_HMAC((const char *)shared_key, strlen((const char *)shared_key), salt, SALT_LENGTH, 200000, EVP_sha512(), KEY_LENGTH, key);
 }
 
 // Encryption function
 char* encrypt_data(const char *data, const char *shared_key) {
     unsigned char salt[SALT_LENGTH], iv[IV_LENGTH], key[KEY_LENGTH];
     unsigned char auth_tag[TAG_LENGTH];
-    unsigned char *encrypted_data = NULL;
-    int len, encrypted_data_len = 0;
+    unsigned char encrypted_data[1024]; // Adjust as needed
+    int len, encrypted_data_len;
     EVP_CIPHER_CTX *ctx;
-
-    // Allocate enough memory for encrypted data
-    encrypted_data = malloc(strlen(data) + EVP_CIPHER_block_size(EVP_aes_256_gcm()) - 1);
-    if (encrypted_data == NULL) {
-        log_it("Memory allocation failed for encrypted data");
-        return NULL;
-    }
 
     // Generate random salt and IV
     RAND_bytes(salt, SALT_LENGTH);
     RAND_bytes(iv, IV_LENGTH);
 
     // Derive key
-    PKCS5_PBKDF2_HMAC(shared_key, strlen(shared_key), salt, SALT_LENGTH, 200000, EVP_sha512(), KEY_LENGTH, key);
+    derive_key((unsigned char *)shared_key, salt, key);
 
     // Initialize encryption context
     ctx = EVP_CIPHER_CTX_new();
-    if (ctx == NULL) {
-        free(encrypted_data);
-        log_it("Failed to create encryption context");
-        return NULL;
-    }
-
-    if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL)) {
-        EVP_CIPHER_CTX_free(ctx);
-        free(encrypted_data);
-        log_it("Failed to initialize encryption context");
-        return NULL;
-    }
-
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL);
     EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, IV_LENGTH, NULL);
-    if (1 != EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv)) {
-        EVP_CIPHER_CTX_free(ctx);
-        free(encrypted_data);
-        log_it("Failed to set key and IV");
-        return NULL;
-    }
+    EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv);
 
     // Encrypt the data
     if (1 != EVP_EncryptUpdate(ctx, encrypted_data, &len, (unsigned char *)data, strlen(data))) {
         EVP_CIPHER_CTX_free(ctx);
-        free(encrypted_data);
-        log_it("Encryption failed");
-        return NULL;
+        return NULL; // Encryption failed
     }
     encrypted_data_len = len;
-
     if (1 != EVP_EncryptFinal_ex(ctx, encrypted_data + len, &len)) {
         EVP_CIPHER_CTX_free(ctx);
-        free(encrypted_data);
-        log_it("Final encryption step failed");
-        return NULL;
+        return NULL; // Finalizing encryption failed
     }
     encrypted_data_len += len;
 
     // Get the authentication tag
     if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LENGTH, auth_tag)) {
         EVP_CIPHER_CTX_free(ctx);
-        free(encrypted_data);
-        log_it("Failed to get authentication tag");
-        return NULL;
+        return NULL; // Getting tag failed
     }
 
     EVP_CIPHER_CTX_free(ctx);
@@ -244,36 +183,14 @@ char* encrypt_data(const char *data, const char *shared_key) {
     char *auth_tag_b64 = base64_encode(auth_tag, TAG_LENGTH);
     char *encrypted_data_b64 = base64_encode(encrypted_data, encrypted_data_len);
 
-    if (!salt_b64 || !iv_b64 || !auth_tag_b64 || !encrypted_data_b64) {
-        free(encrypted_data);
-        free(salt_b64);
-        free(iv_b64);
-        free(auth_tag_b64);
-        free(encrypted_data_b64);
-        log_it("Base64 encoding failed");
-        return NULL;
-    }
-
     // Prepare the result string
     char *result = (char *)malloc(strlen(salt_b64) + strlen(iv_b64) + strlen(auth_tag_b64) + strlen(encrypted_data_b64) + 4);
-    if (!result) {
-        free(encrypted_data);
-        free(salt_b64);
-        free(iv_b64);
-        free(auth_tag_b64);
-        free(encrypted_data_b64);
-        log_it("Memory allocation failed for result");
-        return NULL;
-    }
+    sprintf(result, "%s:%s:%s:%s", salt_b64, iv_b64, auth_tag_b64, encrypted_data_b64);
 
-    snprintf(result, strlen(salt_b64) + strlen(iv_b64) + strlen(auth_tag_b64) + strlen(encrypted_data_b64) + 4, "%s:%s:%s:%s", salt_b64, iv_b64, auth_tag_b64, encrypted_data_b64);
-
-    OPENSSL_cleanse(key, KEY_LENGTH);
     free(salt_b64);
     free(iv_b64);
     free(auth_tag_b64);
     free(encrypted_data_b64);
-    free(encrypted_data);
 
     return result;
 }
@@ -281,13 +198,20 @@ char* encrypt_data(const char *data, const char *shared_key) {
 // Decryption function
 char* decrypt_data(const char *encrypted, const char *shared_key) {
     unsigned char salt[SALT_LENGTH], iv[IV_LENGTH], auth_tag[TAG_LENGTH];
-    unsigned char encrypted_data[CHUNK_SIZE];
+    unsigned char encrypted_data[1024]; // Adjust as needed
     unsigned char key[KEY_LENGTH];
-    int decrypted_len, encrypted_data_len = 0;
+    size_t encrypted_data_len;
     EVP_CIPHER_CTX *ctx;
-    char *encrypted_copy = strdup(encrypted);
-    if (!encrypted_copy) return NULL; // Memory allocation failure
+    int decrypted_len;
+    int out_len;
 
+    // Make a copy of the input string to avoid modifying the original
+    char *encrypted_copy = strdup(encrypted);
+    if (!encrypted_copy) {
+        return NULL; // Memory allocation failure
+    }
+
+    // Split the encrypted string
     char *parts[4];
     char *token = strtok(encrypted_copy, ":");
     for (int i = 0; i < 4; i++) {
@@ -295,69 +219,95 @@ char* decrypt_data(const char *encrypted, const char *shared_key) {
             parts[i] = token;
             token = strtok(NULL, ":");
         } else {
-            free(encrypted_copy);
-            log_it("Invalid format of encrypted string");
-            return NULL;
+            free(encrypted_copy); // Clean up
+            return NULL; // Invalid input
         }
     }
 
-    // Base64 decode
-    if (!base64_decode(parts[0], salt, SALT_LENGTH) ||
-        !base64_decode(parts[1], iv, IV_LENGTH) ||
-        !base64_decode(parts[2], auth_tag, TAG_LENGTH) ||
-        !base64_decode(parts[3], encrypted_data, CHUNK_SIZE)) {
+    // Decode from base64
+    size_t len;
+    unsigned char *salt_b64 = base64_decode(parts[0], &len);
+    if (len != SALT_LENGTH) {
+        free(salt_b64);
         free(encrypted_copy);
-        log_it("Base64 decoding failed");
-        return NULL;
+        return NULL; // Decoding failed or incorrect length
     }
+    memcpy(salt, salt_b64, SALT_LENGTH);
+    free(salt_b64);
 
-    free(encrypted_copy);
+    unsigned char *iv_b64 = base64_decode(parts[1], &len);
+    if (len != IV_LENGTH) {
+        free(iv_b64);
+        free(encrypted_copy);
+        return NULL; // Decoding failed or incorrect length
+    }
+    memcpy(iv, iv_b64, IV_LENGTH);
+    free(iv_b64);
+
+    unsigned char *auth_tag_b64 = base64_decode(parts[2], &len);
+    if (len != TAG_LENGTH) {
+        free(auth_tag_b64);
+        free(encrypted_copy);
+        return NULL; // Decoding failed or incorrect length
+    }
+    memcpy(auth_tag, auth_tag_b64, TAG_LENGTH);
+    free(auth_tag_b64);
+
+    unsigned char *encrypted_data_b64 = base64_decode(parts[3], &len);
+    encrypted_data_len = len;
+    memcpy(encrypted_data, encrypted_data_b64, encrypted_data_len);
+    free(encrypted_data_b64);
 
     // Derive key
-    PKCS5_PBKDF2_HMAC(shared_key, strlen(shared_key), salt, SALT_LENGTH, 200000, EVP_sha512(), KEY_LENGTH, key);
+    derive_key((unsigned char *)shared_key, salt, key);
 
     // Initialize decryption context
     ctx = EVP_CIPHER_CTX_new();
-    if (ctx == NULL) {
-        log_it("Failed to create decryption context");
-        return NULL;
+    if (!ctx) {
+        free(encrypted_copy);
+        return NULL; // Memory allocation failure
     }
 
     if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL)) {
         EVP_CIPHER_CTX_free(ctx);
-        log_it("Failed to initialize decryption context");
-        return NULL;
+        free(encrypted_copy);
+        return NULL; // Initialization failed
     }
 
-    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, IV_LENGTH, NULL);
     if (1 != EVP_DecryptInit_ex(ctx, NULL, NULL, key, iv)) {
         EVP_CIPHER_CTX_free(ctx);
-        log_it("Failed to set key and IV");
-        return NULL;
+        free(encrypted_copy);
+        return NULL; // Initialization failed
     }
 
-    if (1 != EVP_DecryptUpdate(ctx, NULL, &decrypted_len, encrypted_data, encrypted_data_len)) {
+    // Decrypt the data
+    if (1 != EVP_DecryptUpdate(ctx, encrypted_data, &decrypted_len, encrypted_data, encrypted_data_len)) {
         EVP_CIPHER_CTX_free(ctx);
-        log_it("Decryption failed");
-        return NULL;
+        free(encrypted_copy);
+        return NULL; // Decryption failed
     }
 
+    // Set the expected tag value
     if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LENGTH, auth_tag)) {
         EVP_CIPHER_CTX_free(ctx);
-        log_it("Failed to set authentication tag");
-        return NULL;
+        free(encrypted_copy);
+        return NULL; // Setting tag failed
     }
 
-    if (1 != EVP_DecryptFinal_ex(ctx, NULL, &decrypted_len)) {
+    if (1 != EVP_DecryptFinal_ex(ctx, encrypted_data + decrypted_len, &out_len)) {
         EVP_CIPHER_CTX_free(ctx);
-        log_it("Final decryption step failed");
-        return NULL;
+        free(encrypted_copy);
+        return NULL; // Decryption failed
     }
+
+    decrypted_len += out_len;
 
     EVP_CIPHER_CTX_free(ctx);
 
-    // Return the decrypted data as a string
-    return (char *)strdup((char *)encrypted_data);
+    // Null-terminate the decrypted data
+    encrypted_data[decrypted_len] = '\0';
+    free(encrypted_copy);
+    return strdup((const char *)encrypted_data);
 }
 
 void send_command(const char* response) {
@@ -860,7 +810,7 @@ int connect_to_server() {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    snprintf(port_str, sizeof(port_str), "%d", SERVER_PORT);
+    snprintf(port_str, sizeof(port_str), "%s", SERVER_PORT);
 
     // Resolve the server address and port
     int addrResult = getaddrinfo(SERVER_ADDRESS, port_str, &hints, &result);
@@ -918,7 +868,7 @@ int connect_to_server() {
     setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
     // Generate and store session ID
-    get_session_id(IP_ADDRESS);
+    get_session_id(IP_ADDRESS, SESSION_ID);
 
     return 0;
 }

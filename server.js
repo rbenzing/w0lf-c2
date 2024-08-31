@@ -19,14 +19,14 @@
  *    LICENSE: GPL-3.0
  */
 //  ------------------------------------- VARIABLES -------------------------------------
-const { createServer } = require('net');
-const { pbkdf2, randomBytes, createHash, createCipheriv, createHmac, createDecipheriv, timingSafeEqual } = require('crypto');
-const { promisify } = require('util');
-const { networkInterfaces } = require("os");
-const { mkdir, readdir, writeFile } = require('fs');
-const { join } = require('path');
-const { createInterface } = require('readline');
-const { existsSync, createWriteStream } = require('fs');
+const { createServer } = require('node:net');
+const { pbkdf2, randomBytes, createHash, createCipheriv, createHmac, createDecipheriv, timingSafeEqual } = require('node:crypto');
+const { promisify } = require('node:util');
+const { networkInterfaces } = require("node:os");
+const { mkdir, readdir, writeFile, existsSync, createWriteStream } = require('node:fs');
+const { join } = require('node:path');
+const { createInterface } = require('node:readline');
+
 // promises
 const pbkdf2_promise = promisify(pbkdf2);
 const randomBytes_promise = promisify(randomBytes);
@@ -145,6 +145,7 @@ const getSessionId = (ipAddress) => {
         ipAddress = '127.0.0.1';
     }
     const sum = ipAddress.split('.').reduce((acc, val) => acc + parseInt(val), 0);
+    console.log('Sum: ', sum);
     return createHash('sha256').update(ipAddress + '<>' + sum).digest('hex').slice(0, 32);
 };
 
@@ -193,31 +194,49 @@ const encryptData = async (data, sharedKey, cipher = 'aes-256-gcm') => {
  * @returns {Promise<string>}
  */
 const decryptData = async (encrypted, sharedKey) => {
-    if (typeof encrypted !== 'string' || typeof sharedKey !== 'string') {
-        throw new TypeError('Encrypted data and shared key must be strings');
-    }
     try {
-        const [salt, iv, authTag, encryptedData] = encrypted.split(':');
-        const cipher = Buffer.from(iv, 'base64').length === 12 ? 'aes-256-gcm' : 'aes-256-cbc';
-        const key = await pbkdf2_promise(sharedKey, Buffer.from(salt, 'base64'), 200000, 32, 'sha512');
-        const decipher = createDecipheriv(cipher, key, Buffer.from(iv, 'base64'));
-        if (cipher.endsWith('gcm')) {
-            decipher.setAuthTag(Buffer.from(authTag, 'base64'));
-        } else {
+        // Split and decode Base64 encoded components
+        const [salt, iv, authTag, encryptedData] = encrypted.split(':').map(part => Buffer.from(part, 'base64'));
+
+        // Determine the cipher mode based on IV length
+        const cipher = iv.length === 12 ? 'aes-256-gcm' : 'aes-256-cbc';
+
+        // Derive the key using PBKDF2
+        const key = await pbkdf2_promise(sharedKey, salt, 200000, 32, 'sha512');
+
+        if (cipher === 'aes-256-gcm') {
+            // Initialize decipher for AES-GCM
+            const decipher = createDecipheriv(cipher, key, iv);
+            decipher.setAuthTag(authTag);
+
+            // Decrypt the data
+            let decryptedData = decipher.update(encryptedData);
+            decryptedData = Buffer.concat([decryptedData, decipher.final()]);
+
+            return decryptedData.toString('utf8');
+        } else if (cipher === 'aes-256-cbc') {
+            // Initialize decipher for AES-CBC
+            const decipher = createDecipheriv(cipher, key, iv);
+
+            // Decrypt the data
+            let decryptedData = decipher.update(encryptedData);
+            decryptedData = Buffer.concat([decryptedData, decipher.final()]);
+
+            // Create HMAC to verify the authenticity of the data
             const hmac = createHmac('sha256', key);
-            hmac.update(Buffer.from(encryptedData, 'base64'));
+            hmac.update(Buffer.concat([iv, encryptedData]));
             const computedAuthTag = hmac.digest();
-            if (!timingSafeEqual(Buffer.from(authTag, 'base64'), computedAuthTag)) {
+
+            // Verify HMAC
+            if (!timingSafeEqual(authTag, computedAuthTag)) {
                 throw new Error('Authentication failed. The data may have been tampered with.');
             }
+
+            return decryptedData.toString('utf8');
+        } else {
+            throw new Error('Unsupported cipher mode.');
         }
-        let decryptedData = decipher.update(encryptedData, 'base64', 'utf8');
-        decryptedData += decipher.final('utf8');
-        return decryptedData;
     } catch (err) {
-        if (err instanceof TypeError) {
-            throw err;
-        }
         throw new Error(`Decryption failed: ${err.message}`);
     }
 };
