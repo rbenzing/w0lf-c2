@@ -266,7 +266,7 @@ def connect_to_server():
         beacon_thread = Thread(target=beacon)
         beacon_thread.start()
         
-        while True:
+        while not exit_process:
             data = client.recv(1024)
             if not data:
                 break
