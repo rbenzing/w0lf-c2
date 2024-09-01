@@ -8,16 +8,7 @@ rust-version = "1.80.1"
 readme = "README.md"
 license = "GPL-3.0-only"
 
-[lib]
-name = "client"
-path = "src/client.rs"
-
-[target.x86_64-pc-windows-msvc.llvm-config]
-llvm-config = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\Llvm\\x64\\bin"
-
 [dependencies]
-opencv = "0.92.2"
-screenshots = "0.8.10"
 time = "0.3.36"
 image = "0.25.2"
 pbkdf2 = "0.12.2"
@@ -29,3 +20,5 @@ chrono = "0.4.38"
 rand = "0.8.5"
 serde_json = "1.0.127"
 hex = "0.4.3"
+opencv = "0.92.2"
+screenshots = "0.8.10"

