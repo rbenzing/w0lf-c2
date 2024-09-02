@@ -30,59 +30,45 @@ void log_it(const char* format, ...) {
     va_end(args);
 }
 
-int get_session_id(const char *ip_address, char *session_id, size_t session_id_size) {
-    if (!ip_address || !session_id || session_id_size < SESSION_ID_LENGTH + 1) {
+fn get_session_id(ip_address: &str) -> Result<String, Box<dyn Error>> {
+    if ip_address.is_empty() {
         log_it("Invalid input provided");
-        return -1;
+        return Err("Invalid input provided".into());
     }
-
-    char ip_copy[MAX_IP_LEN + 1];
-    snprintf(ip_copy, sizeof(ip_copy), "%s", ip_address);
 
     // Remove port if present
-    char *port_pos = strstr(ip_copy, ":" SERVER_PORT);
-    if (port_pos) *port_pos = '\0';
+    let ip_copy = ip_address.split(':').next().unwrap_or(ip_address);
 
     // Handle IPv6 localhost
-    if (strcmp(ip_copy, "::1") == 0) {
-        strncpy(ip_copy, "127.0.0.1", sizeof(ip_copy) - 1);
-        ip_copy[sizeof(ip_copy) - 1] = '\0';
-    }
+    let ip_copy = if ip_copy == "::1" {
+        "127.0.0.1"
+    } else {
+        ip_copy
+    };
 
     // Calculate sum of IP parts for IPv4
-    int sum = 0;
-    if (strchr(ip_copy, '.')) {
-        char *token = strtok(ip_copy, ".");
-        while (token != NULL) {
-            sum += atoi(token);
-            token = strtok(NULL, ".");
+    let sum: u32 = match ip_copy.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => ip.octets().iter().map(|&x| x as u32).sum(),
+        Ok(IpAddr::V6(_)) => 0,  // We don't sum IPv6 addresses
+        Err(_) => {
+            log_it("Invalid IP address");
+            return Err("Invalid IP address".into());
         }
-    }
+    };
 
     // Prepare hash input
-    char hash_input[MAX_IP_LEN + 13];  // Extra space for "<>" and sum
-    snprintf(hash_input, sizeof(hash_input), "%s<>%d", ip_address, sum);
+    let hash_input = format!("{}<>{}", ip_address, sum);
 
-    // Compute SHA256 hash
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    if (!SHA256_Init(&sha256) || 
-        !SHA256_Update(&sha256, hash_input, strlen(hash_input)) || 
-        !SHA256_Final(hash, &sha256)) {
-        log_it("SHA256 computation failed");
-        return -1;
-    }
+    // Compute SHA256 hash with key
+    let mut hasher = Sha256::new();
+    hasher.update(hash_input.as_bytes());
+    let hash = hasher.finalize();
 
     // Convert hash to hex and truncate to 32 characters
-    static const char hex_chars[] = "0123456789abcdef";
-    for (int i = 0; i < SESSION_ID_LENGTH / 2; i++) {
-        session_id[i * 2] = hex_chars[(hash[i] >> 4) & 0xF];
-        session_id[i * 2 + 1] = hex_chars[hash[i] & 0xF];
-    }
-    session_id[SESSION_ID_LENGTH] = '\0';
+    let session_id = hex::encode(&hash[..16]);
 
-    log_it("Session ID: %s", session_id);
-    return 0;
+    log_it(&format!("Session ID: {}", session_id));
+    Ok(session_id)
 }
 
 // Function to encode base64

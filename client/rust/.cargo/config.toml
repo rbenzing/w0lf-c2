@@ -1,4 +1,0 @@
-[env]
-VCPKGRS_DYNAMIC="1"
-LLVM_CONFIG_PATH="C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\Llvm\\x64\\bin"
-LIBCLANG_PATH="C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\Llvm\\x64\\bin"
