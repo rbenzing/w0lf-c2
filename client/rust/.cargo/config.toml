@@ -1,17 +1,4 @@
-[build]
-target="x86_64-pc-windows-msvc"
-
 [env]
-VCPKG_ROOT="C:\\vcpkg"
-VCPKGRS_TRIPLET="x86_64-pc-windows-msvc"
-OPENCV_DIR="C:\\vcpkg\\installed\\x64-windows\\share\\opencv4"
-OPENCV_LINK_PATHS="C:\\vcpkg\\installed\\x64-windows\\lib"
-OPENCV_INCLUDE_PATHS="C:\\vcpkg\\installed\\x64-windows\\include"
-OPENCV_HEADER_DIR="C:\\vcpkg\\installed\\x64-windows\\include"
-
-[target.x86_64-pc-windows-msvc.llvm-config]
-llvm-config="C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\Llvm\\x64\\bin"
-
-[target.x86_64-pc-windows-msvc.opencv]
-rustc-link-lib=["opencv_core4","opencv_highgui4","opencv_imgcodecs4","opencv_videoio4"]
-rustc-link-search=["C:\\vcpkg\\installed\\x64-windows\\bin"]
+VCPKGRS_DYNAMIC="1"
+LLVM_CONFIG_PATH="C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\Llvm\\x64\\bin"
+LIBCLANG_PATH="C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\Llvm\\x64\\bin"
