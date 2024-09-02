@@ -1,9 +1,8 @@
 use async_std::net::TcpStream;
 use async_std::task;
-use async_trait::async_trait;
 use std::path::Path;
 use std::process::Output;
-use std::io::prelude::*;
+use std::io::{Read, Write, prelude::*};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::fs::{File, create_dir};
