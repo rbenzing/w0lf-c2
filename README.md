@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository serves as a Education reference and contains the implementation of a Command and Control (C&C) server used for managing and controlling remote clients. The server facilitates communication with these clients, allowing for command execution, data retrieval, and other operations as needed.
+This repository serves as a educational reference and contains the implementation of a Command and Control (C&C) server used for managing and controlling remote clients. The server facilitates communication with these clients, allowing for command execution, data retrieval, and other operations as needed.
 
 ## Features
 

