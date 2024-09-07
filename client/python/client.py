@@ -50,7 +50,6 @@ if LOGGING:
     # Check if the logs directory exists, if not, create it
     if not path.exists(log_dir):
         makedirs(log_dir)
-    
     log_stream = open(path.join(log_dir, 'client.log'), 'a')
 
 def log_it(message):
