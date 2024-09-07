@@ -496,7 +496,11 @@ const sendCommandToClient = async (client, command, args) => {
 const executeClientCommand = async (client, command) => {
     const socket = client.socket;
     const sessionId = client.sessionId;
-    const payload = await encryptData(command, sessionId);
+    let cipher = 'aes-256-gcm';
+    if (client.type === 'ps') {
+        cipher = 'aes-256-cbc';
+    }
+    const payload = await encryptData(command, sessionId, cipher);
     if (payload) {
         return new Promise((resolve) => {
             if (socket.write(payload) === true) {

