@@ -1,4 +1,4 @@
-# C2 C&C Server
+# C2 Server
 
 ## Overview
 
