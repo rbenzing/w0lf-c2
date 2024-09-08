@@ -155,14 +155,11 @@ func GetSessionID() {
 		WriteLog("Client is not properly initialized.")
 		return
 	}
-
 	ipAddress := client.LocalAddr().String()
 	if ipAddress == "::1" {
 		ipAddress = "127.0.0.1"
 	}
-
 	WriteLog("IP Address: %s\n", ipAddress)
-
 	parts := strings.Split(ipAddress, ".")
 	sumIp := 0
 	for _, part := range parts {
@@ -170,15 +167,12 @@ func GetSessionID() {
 		fmt.Sscanf(part, "%d", &partInt)
 		sumIp += partInt
 	}
-
 	data := fmt.Sprintf("%s<>%d", ipAddress, sumIp)
 	hash := sha256.New()
 	hash.Write([]byte(data))
 	hashBytes := hash.Sum(nil)
-
 	crypt := hex.EncodeToString(hashBytes)[:32]
 	sessionId = strings.ToLower(crypt)
-
 	WriteLog("Session ID: %s\n", sessionId)
 }
 
