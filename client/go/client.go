@@ -171,7 +171,10 @@ func GetSessionID() {
 	}
 	data := fmt.Sprintf("%s<>%d", ipAddress, sumIp)
 	hash := sha256.New()
-	hash.Write([]byte(data))
+	_, err := hash.Write([]byte(data))
+	if err != nil {
+		WriteLog("Failed to hash data: %s\n", err.Error())
+	}
 	hashBytes := hash.Sum(nil)
 	crypt := hex.EncodeToString(hashBytes)[:32]
 	sessionId = strings.ToLower(crypt)
@@ -276,31 +279,24 @@ func SendCommand(response interface{}) {
 		WriteLog("Failed to marshal response: %v", err)
 		return
 	}
-
 	encrypted, err := EncryptData(string(jsonData), sessionId)
 	if err != nil {
 		WriteLog("Failed to encrypt data: %v", err)
 		return
 	}
-
-	// Split the encrypted data into chunks and send each chunk
 	encryptedBytes := []byte(encrypted)
 	totalLength := len(encryptedBytes)
-
 	if totalLength >= chunkSize {
 		for i := 0; i < totalLength; i += chunkSize {
 			end := i + chunkSize
 			if end > totalLength {
 				end = totalLength
 			}
-
 			chunk := encryptedBytes[i:end]
 			if end == totalLength {
 				chunk = append(chunk, []byte("--FIN--")...)
 			}
-
 			WriteLog("Sent Chunk: %s", string(chunk))
-
 			if _, err := client.Write(chunk); err != nil {
 				WriteLog("failed to write chunk to client: %w", err)
 				return
@@ -308,7 +304,6 @@ func SendCommand(response interface{}) {
 		}
 	} else {
 		WriteLog("Sent Data: %s", encrypted)
-
 		if _, err := client.Write(encryptedBytes); err != nil {
 			WriteLog("failed to write data to client: %w", err)
 			return
