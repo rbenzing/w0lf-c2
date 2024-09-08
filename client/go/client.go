@@ -130,26 +130,19 @@ type (
 
 func WriteLog(message string, v ...any) {
 	if logEnabled {
-		// Ensure the log directory exists
 		if err := os.MkdirAll(filepath.Dir(logpath), 0755); err != nil {
 			logEnabled = false
 			log.Fatalf("Failed to create log directory: %v", err)
 		}
-
-		// Open log file
 		file, err := os.OpenFile(logpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			logEnabled = false
 			log.Fatalf("Failed to open log file: %v", err)
 		}
 		defer file.Close()
-
-		// Initialize logStream if necessary
 		if logStream == nil {
 			logStream = log.New(file, "", log.LstdFlags|log.Lshortfile)
 		}
-
-		// Format and write the log message
 		if len(v) > 0 {
 			message = fmt.Sprintf(message, v...)
 		}
