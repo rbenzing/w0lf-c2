@@ -13,6 +13,7 @@
 			"sha.h": "c",
 			"evp.h": "c",
 			"wincodec.h": "c"
-		}
+		},
+		"makefile.configureOnOpen": false
 	}
 }

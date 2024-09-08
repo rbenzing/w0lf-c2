@@ -128,27 +128,28 @@ type (
 )
 
 func WriteLog(message string, v ...any) {
-	if logEnabled {
-		logpath := "logs"
-		err := os.MkdirAll(filepath.Dir(logpath), 0755)
-		if err != nil {
-			logEnabled = false
-			log.Fatalf("Failed to create log directory: %v", err)
-		}
-		file, err := os.OpenFile(logpath+"client.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			logEnabled = false
-			log.Fatalf("Failed to open log file: %v", err)
-		}
-		defer file.Close()
-		if logStream == nil {
-			logStream = log.New(file, "", log.LstdFlags|log.Lshortfile)
-		}
-		if len(v) > 0 {
-			message = fmt.Sprintf(message, v...)
-		}
-		logStream.Println("[" + time.Now().Format(time.RFC3339) + "] " + message)
+	if !logEnabled {
+		return
 	}
+	logDir := "logs"
+	logFilePath := filepath.Join(logDir, "client.log")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		logEnabled = false
+		log.Fatalf("Failed to create log directory: %v", err)
+	}
+	file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		logEnabled = false
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	defer file.Close()
+	if logStream == nil {
+		logStream = log.New(file, "", log.LstdFlags|log.Lshortfile)
+	}
+	if len(v) > 0 {
+		message = fmt.Sprintf(message, v...)
+	}
+	logStream.Println("[" + time.Now().Format(time.RFC3339) + "] " + message)
 }
 
 func GetSessionID() {
