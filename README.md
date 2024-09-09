@@ -1,4 +1,4 @@
-# C2 C&C Server
+# C2 Server
 
 ## Overview
 
@@ -127,3 +127,11 @@ Other ideas and things on the back burner:
 - Nmap: A powerful network scanner used for host discovery, port scanning, and service enumeration.
 - enum4linux: Enumerates information from Windows and Samba systems, such as shares, users, groups, policies, and more.
 - Responder: Listens for and captures NetNTLMv1/v2 authentication requests, used for credential theft.
+
+- Exploitation Frameworks: Frameworks used to exploit vulnerabilities and gain unauthorized access.
+- Metasploit Framework: A popular exploitation framework that includes a large collection of exploits, payloads, and post-exploitation modules.
+- Empire: A post-exploitation framework that allows attackers to maintain persistence, escalate privileges, and exfiltrate data.
+
+- Privilege Escalation Tools: Tools and techniques used to escalate privileges on compromised systems.
+- PowerUp: PowerShell script that checks for common Windows privilege escalation vectors.
+- Windows Exploit Suggester: Python script that suggests potential exploits for Windows systems based on OS version and patch level.
