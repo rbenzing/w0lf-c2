@@ -2,10 +2,10 @@
   "name": "w0lf-server",
   "version": "0.2.0",
   "description": "The W0lf Server",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node src/server.js"
   },
   "author": "Russell Benzing",
   "license": "GPL-3.0-only"
