@@ -10,5 +10,7 @@
 **/legacy
 **/node_modules
 **/package-lock.json
-**/.ninja_log
 **/out
+**/client.exe
+**/Cargo.lock
+**/target

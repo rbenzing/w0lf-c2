@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"stdlib.h": "c",
+			"rand.h": "c",
+			"err.h": "c",
+			"buffer.h": "c",
+			"sha.h": "c",
+			"evp.h": "c",
+			"wincodec.h": "c"
+		},
+		"makefile.configureOnOpen": false
+	}
+}

