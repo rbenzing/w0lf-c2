@@ -2,8 +2,8 @@
 This is an educational project to create a Rust client for W0lf C2.
 
 ## Windows x86_x64 Installation
-- Visual Studio Code - Install (https://code.visualstudio.com/download)
-- rust-analyzer - Install the VS Code extension.
+- Visual Studio Code - Install VS Code. (https://code.visualstudio.com/download)
+- rust-analyzer - Install the VS Code extension. (https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
 - rust - install Rust (https://rustup.rs/)
 - vcpkg - Install vcpkg package manager (https://github.com/microsoft/vcpkg)
  - `git clone https://github.com/Microsoft/vcpkg.git`
