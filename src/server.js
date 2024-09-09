@@ -117,13 +117,13 @@ const handleResponse = (response) => {
         if (data.type === "Buffer") {
             // handle buffer response
             const response = Buffer.from(data.data).toString('utf8').trim();
-            log(response, logStream);
+            log(response, undefined, logStream);
             return;
         } else {
             if (typeof data !== 'string') {
                 data = JSON.stringify(data);
             }
-            log(data.toString('utf8').trim(), logStream);
+            log(data.toString('utf8').trim(), undefined, logStream);
         }
         return;
     } else if (response.message) {
@@ -166,13 +166,13 @@ const showClient = () => {
 const setClientActive = (sessionId) => {
     if (!sessionId) {
         activeClientSessionID = null;
-        log('The active session ID has been cleared.', logStream);
+        log('The active session ID has been cleared.', undefined, logStream);
         return;
     }
     let clientExists = activeClients.get(sessionId);
     if (sessionId && clientExists && sessionId.length === 32) {
         activeClientSessionID = sessionId;
-        log(`${activeClientSessionID} is now the active session.`, logStream);
+        log(`${activeClientSessionID} is now the active session.`, undefined, logStream);
     } else {
         logError('Invalid session ID.', logStream);
     }
@@ -223,7 +223,7 @@ const handleServerCommand = async (command, properties) => {
                         await rl.write("\u001b[0J\u001b[1J\u001b[2J\u001b[0;0H\u001b[0;0W", { ctrl: true, name: 'l'});
                         break;
                     case 'uptime':
-                        log(getUptime(startTime), logStream);
+                        log(getUptime(startTime), undefined, logStream);
                         break;
                     case 'set':
                         setClientActive(properties[0]);
