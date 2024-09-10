@@ -22,7 +22,7 @@
 const { createServer } = require('node:net');
 const { promisify } = require('node:util');
 
-const { mkdir, readdir, writeFile, existsSync, createWriteStream } = require('node:fs');
+const { mkdir, readdir, writeFile, existsSync } = require('node:fs');
 const { join } = require('node:path');
 const { createInterface } = require('node:readline');
 
@@ -30,18 +30,17 @@ const { encryptData, decryptData, getSessionId } = require('./utils/encdec');
 const { getLocalIpAddress, getUptime } = require('./utils/helpers');
 const { log, logInfo, logError, logSuccess, createLogStream } = require('./utils/logging');
 
+const config = require('./config/configLoader');
+
 // promises
 const mkdir_promise = promisify(mkdir);
 const readdir_promise = promisify(readdir);
 const writeFile_promise = promisify(writeFile);
 
 const _VERSION = '0.2.0';
-const CHUNK_SIZE = 1024;
-const PORT = 54678;
-const LOGGING = true;
 
-const DOWNLOADS_FOLDER = join(__dirname, 'downloads');
-const PLUGINS_FOLDER = join(__dirname, 'plugins');
+const DOWNLOADS_FOLDER = join(__dirname, config.path.downloads);
+const PLUGINS_FOLDER = join(__dirname, config.path.plugins);
 
 const activeClients = new Map();
 const queuedCommands = new Map();
@@ -457,7 +456,7 @@ const getWolfText = () => {
  */
 const getStartup = () => {
     getWolfText();
-    log([`Ver. ${_VERSION}`, ' | ',`Listening on: ${getLocalIpAddress()}:${PORT}`, ' | ', `${getUptime(startTime)}`], [94, 97, 93, 97, 93], logStream);
+    log([`Ver. ${_VERSION}`, ' | ',`Listening on: ${getLocalIpAddress()}:${config.server.port}`, ' | ', `${getUptime(startTime)}`], [94, 97, 93, 97, 93], logStream);
 };
 
 /**
@@ -568,7 +567,7 @@ const startInputListener = () => {
                 rl.prompt();
                 return;
             }
-            if (LOGGING && logStream) {
+            if (config.logging.enabled && logStream) {
                 logStream.write(`Enter command > ${command}\n`);
             }
             // handle the command
@@ -609,7 +608,7 @@ server = createServer((socket) => {
     }
     socket.on('data', async (payload) => {
         try {
-            if (payload.length >= CHUNK_SIZE || payload.includes('--FIN--')) {
+            if (payload.length >= config.data.chunk_size || payload.includes('--FIN--')) {
                 // chunk mode
                 client.waiting = true;
                 client.buffer += payload;
@@ -665,8 +664,8 @@ server.on('error', (err) => {
     closeServer();
 });
 
-server.listen(PORT, async () => {
-    logStream = await createLogStream(LOGGING);
+server.listen(config.server.port, async () => {
+    logStream = await createLogStream();
     getHowel();
     getStartup();
     await loadAndRegisterPlugins();

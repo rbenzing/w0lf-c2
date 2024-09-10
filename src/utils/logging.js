@@ -2,23 +2,26 @@
 const { mkdir, existsSync, createWriteStream } = require('node:fs');
 const { join } = require('node:path');
 const { promisify } = require('node:util');
-const mkdir_promise = promisify(mkdir);
 
-const LOGS_FOLDER = join(__dirname, '../logs');
-const MAX_LOG_LINES = 20000;
+const config = require('../config/configLoader');
+
+const mkdir_promise = promisify(mkdir);
 
 let currentLineCount = 0; // current log line count
 let logFileIndex = 1; // log file index
-let logging = false;
+let _scope_config = null; // scoped config object
+
+const LOGS_FOLDER = join("../", config.path.logs);
 
 // Create a writable stream for logging
-const createLogStream = async (isLogging) => {
-    if (isLogging) {
-        logging = true;
+const createLogStream = async () => {
+    _scope_config = config;
+    if (config.logging.enabled) {
         if (!existsSync(LOGS_FOLDER)) {
             await mkdir_promise(LOGS_FOLDER);
         }
-        const logFilePath = join(LOGS_FOLDER, `server_${logFileIndex}.log`);
+        const filename = config.logging.filename.split('.')[0];
+        const logFilePath = join(LOGS_FOLDER, `${filename}_${logFileIndex}.log`);
         return createWriteStream(logFilePath, { flags: 'a' });
     }
     return null;
@@ -35,12 +38,12 @@ const log = async (texts, colors = 97, logStream) => {
         return;
     }
 
-    if (logging && logStream) {
+    if (_scope_config.logging.enabled && logStream) {
         const message = texts.join(' ');
         const lineCount = message.split(/\r\n|\r|\n/).length;
         
         currentLineCount += lineCount;
-        if (currentLineCount >= MAX_LOG_LINES) {
+        if (currentLineCount >= config.logging.maxlines) {
             logStream.end();
             logFileIndex++;
             logStream = await createLogStream(logFileIndex);

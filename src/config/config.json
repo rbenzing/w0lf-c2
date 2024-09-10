@@ -1,0 +1,22 @@
+{
+    "server": {
+      "port": 54678,
+      "method": "tcp"
+    },
+    "encryption": {
+      "algorithms": ["aes-256-gcm", "aes-256-cbc"]
+    },
+    "logging": {
+      "enabled": true,
+      "filename": "server.log",
+      "maxlines": 20000
+    },
+    "data": {
+        "chunk_size": 1024
+    },
+    "path": {
+        "downloads": "downloads",
+        "plugins": "plugins",
+        "logs": "logs"
+    }
+  }
