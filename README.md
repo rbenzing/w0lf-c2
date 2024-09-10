@@ -42,6 +42,13 @@ This repository serves as a educational reference and contains the implementatio
 
 - Additional communication channels (https, http2, web socket, udp dgram)
    ```js
+   // https
+   const https = require('https');
+   const server = https.createServer({
+      key: fs.readFileSync('server-key.pem'),
+      cert: fs.readFileSync('server-cert.pem')
+   }, handleClientConnection);
+
    // http2
    const http2 = require('http2');
    const server = http2.createSecureServer({
