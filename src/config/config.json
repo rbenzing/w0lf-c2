@@ -4,6 +4,10 @@
       "port": 54678,
       "protocol": "tcp"
     },
+    "cert": {
+        "key": "private-key.pem",
+        "cert": "certificate.pem"
+    },
     "encryption": {
       "algorithms": ["aes-256-gcm", "aes-256-cbc"]
     },
