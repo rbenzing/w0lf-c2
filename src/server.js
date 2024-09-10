@@ -664,7 +664,7 @@ server.on('error', (err) => {
     closeServer();
 });
 
-server.listen(config.server.port, async () => {
+server.listen(config.server.port, config.server.host, async () => {
     logStream = await createLogStream();
     getHowel();
     getStartup();
