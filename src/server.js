@@ -24,11 +24,11 @@ const { promisify } = require('node:util');
 
 const { mkdir, readdir, writeFile, existsSync } = require('node:fs');
 const { join } = require('node:path');
-const { createInterface } = require('node:readline');
 
 const { encryptData, decryptData, getSessionId } = require('./utils/encdec');
-const { getLocalIpAddress, getUptime } = require('./utils/helpers');
+const { getUptime, displayCommandOptions, getHowel, getStartup, displayActivePlugins } = require('./utils/helpers');
 const { log, logInfo, logError, logSuccess, createLogStream } = require('./utils/logging');
+const { startInputListener } = require('./utils/readline');
 
 const config = require('./config/configLoader');
 
@@ -36,8 +36,6 @@ const config = require('./config/configLoader');
 const mkdir_promise = promisify(mkdir);
 const readdir_promise = promisify(readdir);
 const writeFile_promise = promisify(writeFile);
-
-const _VERSION = '0.2.0';
 
 const DOWNLOADS_FOLDER = join(__dirname, config.path.downloads);
 const PLUGINS_FOLDER = join(__dirname, config.path.plugins);
@@ -137,7 +135,7 @@ const handleResponse = (response) => {
 /**
  * Shows the full active client details
  */
-const showClient = () => {
+const showClient = (activeClientSessionID, activeClients, logStream) => {
     if (!activeClientSessionID) {
         throw new Error(`You must set a session ID first.`);
     }
@@ -161,8 +159,9 @@ const showClient = () => {
 /**
  * Sets the active client session ID
  * @param {*} sessionId 
+ * @param {*} logStream
  */
-const setClientActive = (sessionId) => {
+const setClientActive = (sessionId, logStream) => {
     if (!sessionId) {
         activeClientSessionID = null;
         log('The active session ID has been cleared.', undefined, logStream);
@@ -181,8 +180,9 @@ const setClientActive = (sessionId) => {
  * Handles the command input for the server
  * @param {*} command 
  * @param {*} properties 
+ * @param {*} logStream
  */
-const handleServerCommand = async (command, properties) => {
+const handleServerCommand = async (command, properties, logStream) => {
     try {
         if (clientCommands.includes(command.split(' ')[0]) ||
             serverCommands.includes(command.split(' ')[0])) {
@@ -228,16 +228,16 @@ const handleServerCommand = async (command, properties) => {
                         setClientActive(properties[0]);
                         break;
                     case 'plugins':
-                        displayActivePlugins();
+                        displayActivePlugins(loadedPlugins, logStream);
                         break;
                     case 'help':
-                        displayCommandOptions();
+                        displayCommandOptions(loadedPlugins, logStream);
                         break;
                     case 'client':
-                        showClient(properties[0]);
+                        showClient(activeClientSessionID, activeClients, logStream);
                         break;
                     case 'clients':
-                        showActiveClients();
+                        showActiveClients(activeClients, logStream);
                         break;
                     case 'exit':
                         closeServer();
@@ -324,9 +324,9 @@ const executeQueuedCommands = async (client) => {
  * Shows the clients list
  * @returns 
  */
-const showActiveClients = () => {
+const showActiveClients = (activeClients, logStream) => {
     if (activeClients.size === 0) {
-        getHowel();
+        getHowel(logStream);
         logInfo('No active clients.', logStream);
         return;
     }
@@ -426,96 +426,6 @@ const loadAndRegisterPlugins = async () => {
 };
 
 /**
- * Get the w0lf c2 startup ascii
- */
-const getHowel = () => {
-    log(`⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠁⠸⢳⡄⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⠃⠀⠀⢸⠸⠀⡠⣄⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡠⠃⠀⠀⢠⣞⣀⡿⠀⠀⣧⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣠⡖⠁⠀⠀⠀⢸⠈⢈⡇⠀⢀⡏⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⡴⠩⢠⡴⠀⠀⠀⠀⠀⠈⡶⠉⠀⠀⡸⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⢀⠎⢠⣇⠏⠀⠀⠀⠀⠀⠀⠀⠁⠀⢀⠄⡇⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⢠⠏⠀⢸⣿⣴⠀⠀⠀⠀⠀⠀⣆⣀⢾⢟⠴⡇⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⢀⣿⠀⠠⣄⠸⢹⣦⠀⠀⡄⠀⠀⢋⡟⠀⠀⠁⣇⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⢀⡾⠁⢠⠀⣿⠃⠘⢹⣦⢠⣼⠀⠀⠉⠀⠀⠀⠀⢸⡀⠀⠀⠀⠀
-⠀⠀⠀⢀⣴⠫⠤⣶⣿⢀⡏⠀⠀⠘⢸⡟⠋⠀⠀⠀⠀⠀⠀⠀⠀⢣⠀⠀⠀⠀
-⠐⠿⢿⣿⣤⣴⣿⣣⢾⡄⠀⠀⠀⠀⠳⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢳⠀⠀⠀
-⠀⠀⠀⣨⣟⡍⠉⠚⠹⣇⡄⠀⠀⠀⠀⠀⠀⠀⠀⠈⢦⠀⠀⢀⡀⣾⡇⠀⠀
-⠀⠀⠀⢠⠟⣹⣧⠃⠀⠀⢿⢻⡀⢄⠀⠀⠀⠀⠐⣦⡀⣸⣆⠀⣾⣧⣯⢻`, undefined, logStream);
-};
-
-/**
- * Get the w0lf c2 startup text
- */
-const getWolfText = () => {
-    log(`██╗⠘⣰⣿⣿██╗ ██████╗ ██╗⢶⣿⡎⠻⣆███████╗     ██████╗██████╗ 
-██║⡟⡿⢿⡿██║██╔═████╗██║⠙⢿⡄⡈⢆██╔════╝    ██╔════╝╚════██╗
-██║ █╗ ██║██║██╔██║██║⠀⡇⢹⢿⡀█████╗      ██║      █████╔╝
-██║███╗██║████╔╝██║██║⠀⠀⠼⠇⠁██╔══╝      ██║     ██╔═══╝ 
-╚███╔███╔╝╚██████╔╝███████╗██║         ╚██████╗███████╗
- ╚══╝╚══╝  ╚═════╝ ╚══════╝╚═╝          ╚═════╝╚══════╝`, undefined, logStream);
-};
-
-/**
- * Shows the startup info
- */
-const getStartup = () => {
-    getWolfText();
-    log([`Ver. ${_VERSION}`, ' | ',`Listening on: ${getLocalIpAddress()}:${config.server.port}`, ' | ', `${getUptime(startTime)}`], [94, 97, 93, 97, 93], logStream);
-};
-
-/**
- * Displays the active plugins
- */
-const displayActivePlugins = () => {
-    log("\nACTIVE PLUGINS:", 93, logStream);
-    Array.from(loadedPlugins).forEach(plugin => {
-        const [ name, module ] = plugin;
-        log(["Type:", `\t\t${module.type} plugin`], [96, 97], logStream);
-        log(["Name:", `\t\t${name}`], [96, 97], logStream);
-        log(["Description:", `\t${module.description}`], [96, 97], logStream);
-        log(["Commands:", `\t${Object.keys(module.commands).join(', ')}\n`], [96, 97], logStream);
-    });
-};
-
-/**
- * Displays the server commands
- */
-const displayCommandOptions = () => {
-    log("\nSERVER COMMANDS:", 93, logStream);
-    log(["help\t\t", "Display available commands."], [96, 97], logStream);
-    log(["plugins \t", "List all active plugins."], [96, 97], logStream);
-    log(["clients \t", "List all active clients."], [96, 97], logStream);
-    log(["uptime\t\t", "Display server uptime."], [96, 97], logStream);
-    log(["set\t\t", "Sets the client session to make active."], [96, 97], logStream);
-    log(["clear\t\t", "Clear the console."], [96, 97], logStream);
-    log(["exit\t\t", "Exit the server."], [96, 97], logStream);
-    log("\nPLUGINS:", 93, logStream);
-    for (const [pluginName, pluginModule] of loadedPlugins.entries()) {
-        log(`${pluginName}: ${pluginModule.description}`, 93, logStream);
-        if (pluginModule.commands) {
-            let cnt = 0;
-            Object.keys(pluginModule.commands).forEach((command) => {
-                let cmdLength = command.length,
-                format = `\t`;
-                if (cmdLength < 6) {
-                    format = `\t\t`;
-                } else if (cmdLength === 6 || cmdLength === 7) {
-                    format = `  \t`;
-                }
-                cnt += 1;
-                let format2 = "";
-                if (cnt === Object.keys(pluginModule.commands).length) {
-                    format2 = "\n";
-                }
-                log([`${command}${format}`, `${pluginModule.commands[command].description}${format2}`], [96, 97], logStream);
-            });
-        }
-    }
-};
-
-/**
  * Sends the client command
  */
 const sendClientCommand = async (command, args) => {
@@ -578,37 +488,6 @@ const closeServer = () => {
             logSuccess(`LogStream has been closed.`, logStream);
         }
         process.exit(0);
-    });
-};
-
-/**
- * Processes and shows the input on the console
- */
-const startInputListener = () => {
-    rl = createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        prompt: "\x1b[33mEnter command > \x1b[0m"
-    });
-
-    rl.prompt();
-
-    rl.on('line', async (input) => {
-        try {
-            const [command, ...args] = input.trim().split(/ +(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Use regex to split by any whitespace
-            if (!command) {
-                rl.prompt();
-                return;
-            }
-            if (config.logging.enabled && logStream) {
-                logStream.write(`Enter command > ${command}\n`);
-            }
-            // handle the command
-            await handleServerCommand(command, args);
-        } catch (error) {
-            logError(`Error: ${error.message}`, logStream);
-            rl.prompt();
-        }
     });
 };
 
@@ -700,11 +579,36 @@ server.on('error', (err) => {
 });
 
 server.listen(config.server.port, config.server.host, async () => {
+    // create log
     logStream = await createLogStream();
-    getHowel();
-    getStartup();
+
+    // startup logo and info
+    getHowel(logStream);
+    getStartup(startTime, logStream);
+
+    // register plugins
     await loadAndRegisterPlugins();
-    startInputListener();
+
+    // start input listener
+    rl = await startInputListener();
+    rl.on('line', async (input) => {
+        try {
+            const [command, ...args] = input.trim()
+                .split(/ +(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Use regex to split by any whitespace
+            if (!command) {
+                rl.prompt();
+                return;
+            }
+            if (config.logging.enabled && logStream) {
+                logStream.write(`Enter command > ${command}\n`);
+            }
+            // handle the command
+            await handleServerCommand(command, args, logStream);
+        } catch (error) {
+            logError(`Error: ${error.message}`, logStream);
+        }
+    });
+    rl.prompt();
 });
 
 const shutdown = () => {
