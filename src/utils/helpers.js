@@ -1,27 +1,7 @@
 
-const { networkInterfaces } = require("node:os");
 const { log } = require('./logging');
+const { getLocalIpAddress } = require('./network');
 const config = require('../config/configLoader');
-
-/**
- * Get the server local IP address
- * @returns 
- */
-const getLocalIpAddress = () => {
-    const interfaces = networkInterfaces();
-    let localIp;
-
-    // Iterate through the network interfaces
-    Object.keys(interfaces).forEach((ifaceName) => {
-        interfaces[ifaceName].forEach((iface) => {
-            // Skip over non-IPv4 and internal interfaces, and addresses starting with 172. and 127.
-            if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('172.') && !iface.address.startsWith('127.')) {
-                localIp = iface.address
-            }
-        });
-    });
-    return localIp || 'localhost';
-};
 
 /**
  * Format the uptime to hours, minutes and seconds
@@ -113,7 +93,7 @@ const displayCommandOptions = (loadedPlugins, logStream) => {
     log(["set\t\t", "Sets the client session to make active."], [96, 97], logStream);
     log(["clear\t\t", "Clear the console."], [96, 97], logStream);
     log(["exit\t\t", "Exit the server."], [96, 97], logStream);
-    if (loadedPlugins.length > 0) {
+    if (loadedPlugins) {
         log("\nPLUGINS:", 93, logStream);
         for (const [pluginName, pluginModule] of loadedPlugins.entries()) {
             log(`${pluginName}: ${pluginModule.description}`, 93, logStream);
@@ -142,7 +122,6 @@ const displayCommandOptions = (loadedPlugins, logStream) => {
 module.exports = {
     formatTime,
     getUptime,
-    getLocalIpAddress,
     displayCommandOptions,
     displayActivePlugins,
     getWolfText,
