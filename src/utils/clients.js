@@ -96,29 +96,8 @@ const showActiveClients = (activeClients, logStream) => {
     logInfo('└' + colWidths.map(w => '─'.repeat(w)).join('┴') + '┘', logStream);
 };
 
-/**
- * Execute the queued command on a client
- * @param {*} client 
- * @param {*} queuedCommands 
- * @param {*} logStream 
- */
-const executeQueuedCommands = async (client, queuedCommands, logStream) => {
-    if (!client || !client.sessionId) {
-        throw new Error('No active session ID set.');
-    }
-    const commands = queuedCommands.get(client.sessionId);
-    if (commands) {
-        commands.forEach(async ({ command, args }) => {
-            await executeClientCommand(client, `${command} ${args.join(' ')}`);
-            logInfo(`Queued client command executed: ${command} ${args.join(' ')}`, logStream);
-        });
-        queuedCommands.delete(client.sessionId);
-    }
-};
-
 module.exports = {
     showClient,
     setClientActive,
-    showActiveClients,
-    executeQueuedCommands
+    showActiveClients
 };

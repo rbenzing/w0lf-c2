@@ -1,6 +1,6 @@
 
 const { log } = require('./logging');
-const { getLocalIpAddress } = require('./network');
+const { getServerPort } = require('./network');
 const config = require('../config/configLoader');
 
 /**
@@ -64,7 +64,7 @@ const getWolfText = (logStream) => {
  */
 const getStartup = (startTime, logStream) => {
     getWolfText(logStream);
-    log([`Ver. ${config.version}`, ' | ',`Listening on: ${getLocalIpAddress()}:${config.server.port}`, ' | ', `${getUptime(startTime)}`], [94, 97, 93, 97, 93], logStream);
+    log([`Ver. ${config.version}`, ' | ',`Listening on: ${config.server.host}:${getServerPort()}`, ' | ', `${getUptime(startTime)}`], [94, 97, 93, 97, 93], logStream);
 };
 
 /**

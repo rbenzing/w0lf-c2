@@ -47,7 +47,7 @@ This repository serves as a educational reference and contains the implementatio
    const server = https.createServer({
       key: fs.readFileSync('server-key.pem'),
       cert: fs.readFileSync('server-cert.pem')
-   }, handleClientConnection);
+   });
 
    // http2
    const http2 = require('http2');
@@ -60,7 +60,7 @@ This repository serves as a educational reference and contains the implementatio
    const WebSocket = require('ws');
    const wss = new WebSocket.Server({ port: 8080 });
 
-   // https
+   // http
    const http = require('http');
    const server = http.createServer((req, res) => {
       res.statusCode = 200;

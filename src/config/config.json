@@ -2,12 +2,34 @@
     "version": "0.2.0",
     "server": {
       "host": "127.0.0.1",
-      "port": 54678,
-      "protocol": "tcp"
+      "method": "tcp"
     },
-    "cert": {
-        "key": "private-key.pem",
-        "cert": "certificate.pem"
+    "channels": {
+      "tcp": {
+        "port": 54678
+      },
+      "https": {
+        "cert": {
+          "key": "server.key",
+          "cert": "server.cert"
+        }
+      },
+      "http2": {
+        "cert": {
+          "key": "server.key",
+          "cert": "server.cert"
+        }
+      },
+      "tls": {
+        "cert": {
+          "key": "server.key",
+          "cert": "server.cert"
+        }
+      },
+      "udp": {
+        "type": "udp4",
+        "port": 41234
+      }
     },
     "encryption": {
       "algorithms": ["aes-256-gcm", "aes-256-cbc"]

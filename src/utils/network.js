@@ -1,4 +1,19 @@
 const { networkInterfaces } = require("node:os");
+const config = require('../config/configLoader');
+
+const getServerPort = () => {
+    let port = 80;
+    switch(config.server.method) {
+        case 'tcp':
+            port = config.channels.tcp.port;
+            break;
+        case 'https':
+            port = config.channels.tcp.port;
+            break;
+        default:
+    }
+    return port;
+}
 
 /**
  * Implement rate limiting per IP
@@ -47,5 +62,6 @@ const getLocalIpAddress = () => {
 
 module.exports = {
     rateLimit,
-    getLocalIpAddress
+    getLocalIpAddress,
+    getServerPort
 }

