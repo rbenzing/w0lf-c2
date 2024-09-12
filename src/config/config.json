@@ -1,0 +1,50 @@
+{
+    "version": "0.2.0",
+    "server": {
+      "host": "127.0.0.1",
+      "method": "tcp"
+    },
+    "channels": {
+      "tcp": {
+        "port": 54678
+      },
+      "https": {
+        "cert": {
+          "key": "server.key",
+          "cert": "server.cert"
+        }
+      },
+      "http2": {
+        "cert": {
+          "key": "server.key",
+          "cert": "server.cert"
+        }
+      },
+      "tls": {
+        "cert": {
+          "key": "server.key",
+          "cert": "server.cert"
+        }
+      },
+      "udp": {
+        "type": "udp4",
+        "port": 41234
+      }
+    },
+    "encryption": {
+      "algorithms": ["aes-256-gcm", "aes-256-cbc"]
+    },
+    "logging": {
+      "enabled": true,
+      "filename": "server.log",
+      "maxlines": 20000
+    },
+    "data": {
+        "chunk_size": 1024
+    },
+    "path": {
+        "downloads": "downloads",
+        "plugins": "plugins",
+        "logs": "logs"
+    }
+  }
