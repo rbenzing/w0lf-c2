@@ -3,12 +3,13 @@ const { log, logInfo, logSuccess, logError } = require('./logging');
 
 /**
  * Sets the active client session ID
+ * @param {*} activeClients
  * @param {*} activeClientSessionID 
  * @param {*} sessionId 
  * @param {*} logStream 
  * @returns 
  */
-const setClientActive = (activeClientSessionID, sessionId, logStream) => {
+const setClientActive = (activeClients, activeClientSessionID, sessionId, logStream) => {
     if (!sessionId) {
         activeClientSessionID = null;
         log('The active session ID has been cleared.', undefined, logStream);
@@ -53,11 +54,12 @@ const showClient = (activeClientSessionID, activeClients, logStream) => {
 
 /**
  * Shows the clients list
- * @param {*} activeClients 
+ * @param {*} activeClients
+ * @param {*} activeClientSessionID
  * @param {*} logStream 
  * @returns 
  */
-const showActiveClients = (activeClients, logStream) => {
+const showActiveClients = (activeClients, activeClientSessionID, logStream) => {
     if (activeClients.size === 0) {
         getHowel(logStream);
         logInfo('No active clients.', logStream);

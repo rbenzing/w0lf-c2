@@ -13,7 +13,7 @@ const { log, logInfo, logError, logSuccess } = require('./logging');
  * @param {*} logStream 
  */
 const handleBeacon = (response, client, logStream) => {
-    logInfo(`\nReceived beacon from client: ${sessionId}`, logStream);
+    logInfo(`\nReceived beacon from client: ${client.sessionId}`, logStream);
     const date = new Date();
     const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
     const timeOptions = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true };

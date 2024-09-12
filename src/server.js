@@ -24,7 +24,7 @@ const { getUptime, displayCommandOptions, getHowel, getStartup, displayActivePlu
 const { encryptData, decryptData, getSessionId } = require('./utils/encdec');
 const { startInputListener } = require('./utils/readline');
 const { handleResponse, handleBeacon, handleDownloadResponse } = require('./utils/handlers');
-const { setClientActive, showClient, showActiveClients, executeQueuedCommands } = require('./utils/clients');
+const { setClientActive, showClient, showActiveClients } = require('./utils/clients');
 const { loadAndRegisterPlugins } = require('./utils/plugins');
 
 const config = require('./config/configLoader');
@@ -92,7 +92,7 @@ const handleServerCommand = async (command, properties, logStream) => {
                         log(getUptime(startTime), undefined, logStream);
                         break;
                     case 'set':
-                        activeClientSessionID = setClientActive(activeClientSessionID, properties[0], logStream);
+                        activeClientSessionID = setClientActive(activeClients, activeClientSessionID, properties[0], logStream);
                         break;
                     case 'plugins':
                         displayActivePlugins(loadedPlugins, logStream);
@@ -104,7 +104,7 @@ const handleServerCommand = async (command, properties, logStream) => {
                         showClient(activeClientSessionID, activeClients, logStream);
                         break;
                     case 'clients':
-                        showActiveClients(activeClients, logStream);
+                        showActiveClients(activeClients, activeClientSessionID, logStream);
                         break;
                     case 'exit':
                         closeServer();
