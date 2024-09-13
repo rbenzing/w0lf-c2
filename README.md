@@ -40,7 +40,7 @@ This repository serves as a educational reference and contains the implementatio
 
 ## In The Works
 
-- Additional communication channels (https, http2, udp, tls)
+- Additional communication channels (http2, udp, tls)
 - Add more LOLBas commands
    ```bash
    # 1. certutil.exe for Downloading Files

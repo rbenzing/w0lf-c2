@@ -18,7 +18,7 @@
  *    VERSION: 0.2.0
  *    LICENSE: GPL-3.0
  */
-//  ------------------------------------- VARIABLES -------------------------------------
+// ---------------------------------------------------------------------------------
 const { log, logInfo, logError, logSuccess, createLogStream } = require('./utils/logging');
 const { getUptime, displayCommandOptions, getHowel, getStartup, displayActivePlugins } = require('./utils/helpers');
 const { encryptData, decryptData, getSessionId } = require('./utils/encdec');
@@ -325,32 +325,12 @@ const startTLSServer = () => {
     const tls = require('node:tls');
 
     server = tls.createServer({
-        key: fs.readFileSync(path.join(__dirname, 'server.key')),
-        cert: fs.readFileSync(path.join(__dirname, 'server.cert')),
-    }, (socket) => {
-        // finish
-        socket.on('end', () => {
-            logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`, logStream);
-            if (client) {
-                client.lastSeen = new Date();
-                client.active = false;
-            }
-        });
-        socket.on('error', (err) => {
-            logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`, logStream);
-            if (client) {
-                client.active = false;
-            }
-        });
-    });
-};
-
-const startHTTPSServer = () => {
-    const https = require('node:https');
-
-    server = https.createServer({
-        key: fs.readFileSync(path.join(__dirname, 'server.key')),
-        cert: fs.readFileSync(path.join(__dirname, 'server.cert')),
+        key: fs.readFileSync(path.join(__dirname, channels.channels.tls.cert.key)),
+        cert: fs.readFileSync(path.join(__dirname, channels.channels.tls.cert.cert)),
+        ciphers: channels.channels.tls.ciphers,
+        honorCipherOrder: true,
+        minVersion: channels.channels.tls.version, // Minimum TLS version
+        secureOptions: tls.constants.SSL_OP_NO_SSLv2 | tls.constants.SSL_OP_NO_SSLv3 | tls.constants.SSL_OP_NO_COMPRESSION, // Disable SSLv2, SSLv3, and compression
     }, (socket) => {
         // finish
         socket.on('end', () => {
@@ -405,9 +385,6 @@ switch (config.server.method) {
         break;
     case "tls":
         startTLSServer();
-        break;
-    case "https":
-        startHTTPSServer();
         break;
     case "http2":
         startHTTP2Server();

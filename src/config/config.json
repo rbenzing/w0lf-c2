@@ -24,7 +24,10 @@
         "cert": {
           "key": "server.key",
           "cert": "server.cert"
-        }
+        },
+        "port": 443,
+        "version": "TLSv1.2",
+        "ciphers": "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-SHA256"
       },
       "udp": {
         "type": "udp4",
