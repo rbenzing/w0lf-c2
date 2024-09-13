@@ -112,9 +112,9 @@ const handleServerCommand = async (command, properties, logStream) => {
                     default:
                         logInfo('Invalid command. Type "help" to see available commands.', logStream);
                 }
+                rl.prompt();
             }
         }
-        rl.prompt();
     } catch (error) {
         logError(`Exception: ${error.message}`, logStream);
     }

