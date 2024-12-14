@@ -10,7 +10,7 @@ const randomBytes_promise = promisify(randomBytes);
 /**
  * Gets the client Session ID for IPv4 and IPv6
  * @param {string} ipAddress 
- * @returns 
+ * @returns {string}
  */
 const getSessionId = (ipAddress) => {
     let sum = 0;
@@ -30,7 +30,7 @@ const getSessionId = (ipAddress) => {
  * PBKDF2 Encryption
  * @param {string} data 
  * @param {string} sharedKey 
- * @param {string} [cipher='aes-256-gcm'] 
+ * @param {string} cipher
  * @returns {Promise<string>}
  */
 const encryptData = async (data, sharedKey, cipher = 'aes-256-gcm') => {

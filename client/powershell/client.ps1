@@ -12,7 +12,7 @@ $global:sentFirstBeacon = $false
 $global:sessionId = $null
 $global:logEnabled = $true
 $global:chunkSize = 1024
-$global:address = '10.0.0.127'
+$global:address = '127.0.0.1'
 $global:port = 54678
 $global:maxRetries = 5
 $global:retryMode = $false;
@@ -535,7 +535,7 @@ function Connect-ToServer {
 try {
     # Create a writable stream for logging
     if ($global:logEnabled) {
-        $logPath = 'logs\client.log'
+        $logPath = "$PSScriptRoot\logs\client.log"
         $logDir = [System.IO.Path]::GetDirectoryName($logPath)
         if (-not $logDir -or -not (Test-Path -Path $logDir)) {
             New-Item -ItemType Directory -Path $logDir -Force | Out-Null

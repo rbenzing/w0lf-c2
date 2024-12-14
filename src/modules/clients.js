@@ -1,6 +1,7 @@
 const { log, logInfo, logSuccess, logError }  = require('./logging');
 const { encryptData }  = require('./encdec');
 const { queueCommands } = require('./queue');
+const { Socket } = require('node:net');
 
 require('../typedef/definitions');
 
@@ -174,7 +175,7 @@ const getActiveClientSessionId = () => {
  * @param {Socket} socket 
  */
 const addClientSession = (sessionId, socket) => {
-    let client = activeClients.get(sessionId);
+    let client = getClient(sessionId);
     if (!client) {
         const ipAddress = socket.address().address.replace("::ffff:","");
         client = {
@@ -183,7 +184,7 @@ const addClientSession = (sessionId, socket) => {
             address: ipAddress,
             lastSeen: new Date(),
             active: true,
-            buffer: '',
+            buffer: null,
             waiting: false,
             version: null,
             type: null,
@@ -197,32 +198,17 @@ const addClientSession = (sessionId, socket) => {
         client.socket = socket;
         client.lastSeen = (new Date()).getDate();
     }
-    activeClients.set(sessionId, client);
+    setClient(sessionId, client);
 };
 
 /**
  * Upserts client properties to active clients
  * @param {string} sessionId 
- * @param {{
-        sessionId: String,
-        socket: Socket,
-        readline: Interface,
-        address: String,
-        lastSeen: Date,
-        active: Boolean,
-        buffer: ArrayBuffer,
-        waiting: Boolean,
-        version: String,
-        type: String,
-        platform: String, 
-        arch: String, 
-        osver: String, 
-        hostname: String
-    }} payload 
+ * @param {Client} payload 
  */
 const upsertClientSession = (sessionId, payload) => {
-    const client = activeClients.get(sessionId);
-    const newClient = {
+    const client = getClient(sessionId);
+    setClient(sessionId, {
         sessionId: payload.sessionId ?? client.sessionId,
         socket: payload.socket ?? client.socket,
         address: payload.address ?? client.address,
@@ -236,8 +222,7 @@ const upsertClientSession = (sessionId, payload) => {
         arch: payload.arch ?? client.arch, 
         osver: payload.osver ?? client.osver, 
         hostname: payload.hostname ?? client.hostname
-    };
-    activeClients.set(sessionId, newClient);
+    });
 };
 
 /**
@@ -250,25 +235,19 @@ const clearActiveSession = () => {
 /**
  * Returns the client object by session ID
  * @param {string} sessionId 
- * @returns {{
-        sessionId: String,
-        socket: Socket,
-        readline: Interface,
-        address: String,
-        lastSeen: Date,
-        active: Boolean,
-        buffer: ArrayBuffer,
-        waiting: Boolean,
-        version: String,
-        type: String,
-        platform: String, 
-        arch: String, 
-        osver: String, 
-        hostname: String
-    }} Client
+ * @returns {Client} Client
  */
 const getClient = (sessionId) => {
     return activeClients.get(sessionId);
+};
+
+/**
+ * Adds a new client object with sessionID
+ * @param {string} sessionId
+ * @param {Client} client
+ */
+const setClient = (sessionId, client) => {
+    return activeClients.set(sessionId, client);
 };
 
 /**

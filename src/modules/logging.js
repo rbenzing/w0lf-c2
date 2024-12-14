@@ -10,9 +10,11 @@ let logStream = null; // log stream instance
 let currentLineCount = 0; // current log line count
 let logFileIndex = 1; // log file index
 
-const LOGS_FOLDER = join("../", config.path.logs);
+const LOGS_FOLDER = join(__dirname, "../", config.path.logs);
 
-// Create a writable stream for logging
+/**
+ * Create a writable stream for logging
+ */
 const createLogStream = async () => {
     if (config.logging.enable) {
         if (!existsSync(LOGS_FOLDER)) {
@@ -24,6 +26,13 @@ const createLogStream = async () => {
     }
 };
 
+/**
+ * Basic log to console and/or file
+ * @param {string|string[]} texts 
+ * @param {string|string[]} colors 
+ * @param {boolean} skipConsole 
+ * @returns 
+ */
 const log = async (texts, colors = 97, skipConsole = false) => {
     if (config.logging.enable) {
         // Ensure texts and colors are arrays
@@ -56,6 +65,9 @@ const log = async (texts, colors = 97, skipConsole = false) => {
     }
 };
 
+/**
+ * Close the logstream
+ */
 const endLogStream = () => {
     if (logStream) {
         // stop log stream
@@ -65,12 +77,26 @@ const endLogStream = () => {
     }
 };
 
+/**
+ * Log an error message
+ * @param {string} error 
+ */
 const logError = (error) => {
     log(error, 91); // Bright Red
 };
+
+/**
+ * Log an info message
+ * @param {string} info 
+ */
 const logInfo = (info) => {
     log(info, 37); // White
 };
+
+/**
+ * Log a success message
+ * @param {string} success 
+ */
 const logSuccess = (success) => {
     log(success, 92); // Bright Green
 };

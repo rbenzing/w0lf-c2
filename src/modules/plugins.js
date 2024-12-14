@@ -11,7 +11,6 @@ const loadedPlugins = new Map();
 
 /**
  * Loads and registers plugins for the server
- * @param {*} logStream 
  */
 const loadAndRegisterPlugins = async () => {
     try {
@@ -42,7 +41,8 @@ const loadAndRegisterPlugins = async () => {
 
 /**
  * Registers a plugin in the server config
- * @param {*} plugin
+ * @param {*} plugin 
+ * @returns plugin
  */
 const registerPlugin = (plugin) => {
     // Register additional commands provided by the plugin

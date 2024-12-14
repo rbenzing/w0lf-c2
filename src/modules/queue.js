@@ -1,10 +1,12 @@
 const { logInfo }  = require('./logging');
 
+require('../typedef/definitions');
+
 const queuedCommands = new Map();
 
 /**
  * Execute the queued command on a client
- * @param {*} client
+ * @param {Client} client
  */
 const executeQueuedCommands = async (client) => {
     if (!client || !client.sessionId) {
@@ -22,9 +24,9 @@ const executeQueuedCommands = async (client) => {
 
 /**
  * Adds a command to the queue for a client
- * @param {*} client 
- * @param {*} command 
- * @param {*} args
+ * @param {Client} client 
+ * @param {string} command 
+ * @param {string[]} args
  */
 const queueCommands = async (client, command, args) => {
     await new Promise((resolve) => {
@@ -38,7 +40,7 @@ const queueCommands = async (client, command, args) => {
 
 /**
  * Returns the queued commands
- * @returns Map<any, any>
+ * @returns {Map<any, any>}
  */
 const getQueuedCommands = () => {
     return queuedCommands;

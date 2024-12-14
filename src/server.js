@@ -28,8 +28,8 @@ process.on('SIGINT', shutdown);
 // Load Channel
 switch (config.server.method) {
     case "tcp":
-        const { startSocketServer } = require('./channels/socket');
-        startSocketServer();
+        const { listenSocketServer } = require('./channels/socket');
+        listenSocketServer();
         break;
     case "tls":
         const { startTLSServer } = require('./channels/tls');
