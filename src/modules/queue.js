@@ -15,6 +15,7 @@ const executeQueuedCommands = async (client) => {
     const commands = queuedCommands.get(client.sessionId);
     if (commands) {
         commands.forEach(async ({ command, args }) => {
+            const { executeClientCommand } = require('./clients');
             await executeClientCommand(client, [command, ...args].join(' '));
             logInfo(`Queued client command executed: ${command} ${args.join(' ')}`);
         });
