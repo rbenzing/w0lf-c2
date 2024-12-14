@@ -26,6 +26,7 @@ const getServerPort = () => {
 }
 
 /**
+ * TODO: finish implementation of rate limiting
  * Implement rate limiting per IP
  * @param {string} ipAddress 
  * @param {*} rateLimits 
@@ -52,22 +53,26 @@ const rateLimit = (ipAddress, rateLimits) => {
 
 /**
  * Get the server local IP address
- * @returns 
+ * @returns {string}
  */
 const getLocalIpAddress = () => {
-    const interfaces = networkInterfaces();
-    let localIp;
+    try {
+        const interfaces = networkInterfaces();
+        let localIp;
 
-    // Iterate through the network interfaces
-    Object.keys(interfaces).forEach((ifaceName) => {
-        interfaces[ifaceName].forEach((iface) => {
-            // Skip over non-IPv4 and internal interfaces, and addresses starting with 172. and 127.
-            if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('172.') && !iface.address.startsWith('127.')) {
-                localIp = iface.address
-            }
+        // Iterate through the network interfaces
+        Object.keys(interfaces).forEach((ifaceName) => {
+            interfaces[ifaceName].forEach((iface) => {
+                // Skip over non-IPv4 and internal interfaces, and addresses starting with 172. and 127.
+                if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('172.') && !iface.address.startsWith('127.')) {
+                    localIp = iface.address
+                }
+            });
         });
-    });
-    return localIp || 'localhost';
+        return localIp || 'localhost';
+    } catch (error) {
+        logError(`Exception: ${error.message}`);
+    }
 };
 
 module.exports = {

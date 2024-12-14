@@ -41,36 +41,40 @@ const loadAndRegisterPlugins = async () => {
 
 /**
  * Registers a plugin in the server config
- * @param {*} plugin 
- * @returns plugin
+ * @param {Plugin} plugin 
+ * @returns Plugin
  */
 const registerPlugin = (plugin) => {
-    // Register additional commands provided by the plugin
-    if (plugin && plugin.module) {
-        const commandKeys = Object.keys(plugin.module.commands).filter(c => c.method !== 'execute');
-        
-        if (plugin.module.type === 'server') {
-            addServerCommands(commandKeys);
-        } else if(plugin.module.type === 'client') {
-            addClientCommands(commandKeys);
-        }
-        commandKeys.forEach((command) => {
-            // Extract command name and function
-            const cmd = plugin.module.commands[command],
-                  name = cmd.name,
-                  handler = cmd.handler;
-
-            // Check if the command name is not already registered
-            if (!global[name]) {
-                // Register the command globally
-                global[name] = handler;
-            } else {
-                logError(`Plugin: "${plugin.name}" is already registered.`);
+    try {
+        // Register additional commands provided by the plugin
+        if (plugin && plugin.module) {
+            const commandKeys = Object.keys(plugin.module.commands).filter(c => c.method !== 'execute');
+            
+            if (plugin.module.type === 'server') {
+                addServerCommands(commandKeys);
+            } else if(plugin.module.type === 'client') {
+                addClientCommands(commandKeys);
             }
-        });
+            commandKeys.forEach((command) => {
+                // Extract command name and function
+                const cmd = plugin.module.commands[command],
+                    name = cmd.name,
+                    handler = cmd.handler;
+
+                // Check if the command name is not already registered
+                if (!global[name]) {
+                    // Register the command globally
+                    global[name] = handler;
+                } else {
+                    logError(`Plugin: "${plugin.name}" is already registered.`);
+                }
+            });
+        }
+        logInfo(`Plugin: "${plugin.name} - ${plugin.module.description}" has been registered.`);
+        return plugin;
+    } catch (error) {
+        logError(`Exception: ${error.message}`);
     }
-    logInfo(`Plugin: "${plugin.name} - ${plugin.module.description}" has been registered.`);
-    return plugin;
 };
 
 /**

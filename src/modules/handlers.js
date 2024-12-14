@@ -20,23 +20,27 @@ const config = require('./config');
  * @param {Client} client
  */
 const handleBeacon = (response, client) => {
-    logInfo(`\nReceived beacon from client: ${client.sessionId}`);
-    const date = new Date();
-    const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
-    const timeOptions = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true };
-    const formattedDate = date.toLocaleDateString('en-US', dateOptions);
-    const formattedTime = date.toLocaleTimeString('en-US', timeOptions);
+    try {
+        logInfo(`\nReceived beacon from client: ${client.sessionId}`);
+        const date = new Date();
+        const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+        const timeOptions = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true };
+        const formattedDate = date.toLocaleDateString('en-US', dateOptions);
+        const formattedTime = date.toLocaleTimeString('en-US', timeOptions);
 
-    upsertClientSession(client.sessionId, {
-        lastSeen: `${formattedDate} ${formattedTime}`,
-        active: true,
-        type: response.type,
-        version: response.version,
-        platform: response.platform,
-        arch: response.arch, 
-        osver: response.osver,
-        hostname: response.hostname
-    });
+        upsertClientSession(client.sessionId, {
+            lastSeen: `${formattedDate} ${formattedTime}`,
+            active: true,
+            type: response.type,
+            version: response.version,
+            platform: response.platform,
+            arch: response.arch, 
+            osver: response.osver,
+            hostname: response.hostname
+        });
+    } catch (error) {
+        logError(`Error handling download response: ${error.message}`);
+    }
 };
 
 /**

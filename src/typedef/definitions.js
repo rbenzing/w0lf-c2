@@ -30,3 +30,24 @@
         beacon: Boolean
     }} BeaconResponse
  */
+
+/**
+ * The command object definition
+ * @typedef {{
+        name: String,
+        method: String,
+        description: String,
+        parameters: Object
+        handler: Function
+    }} Command
+ */
+
+/**
+ * The plugin object definition
+ * @typedef {{
+        name: String,
+        type: String,
+        description: String,
+        commands: Command[]
+    }} Plugin
+ */

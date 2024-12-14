@@ -1,6 +1,8 @@
 const { createInterface } = require('node:readline');
 const { logError, log, logSuccess, logInfo }  = require('./logging');
 
+require('../typedef/definitions');
+
 // App readline interface
 const rl = createInterface({
     input: process.stdin,
@@ -10,16 +12,20 @@ const rl = createInterface({
 
 /**
  * Creates the client console interface using readline
- * @param {*} client
+ * @param {Client} client
  * @returns Interface
  */
 const createClientConsole = (client) => {
-    const clientRl = createInterface({
-        input: client.socket.stdin,
-        output: client.socket.stdout,
-        prompt: `\x1b[33m${client.address} > \x1b[0m`
-    });
-    return clientRl;
+    try {
+        const clientRl = createInterface({
+            input: client.socket.stdin,
+            output: client.socket.stdout,
+            prompt: `\x1b[33m${client.address} > \x1b[0m`
+        });
+        return clientRl;
+    } catch (error) {
+        logError(`Exception: ${error.message}`);
+    }
 };
 
 /**
@@ -35,32 +41,36 @@ const prompt = () => {
  * Processes and shows the input on the console
  */
 const listenServerConsole = () => {
-    rl.on('line', async (input) => {
-        try {
-            const [command, ...args] = input.trim()
-                .split(/ +(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Use regex to split by any whitespace
-            if (!command) {
+    try {
+        rl.on('line', async (input) => {
+            try {
+                const [command, ...args] = input.trim()
+                    .split(/ +(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Use regex to split by any whitespace
+                if (!command) {
+                    prompt();
+                    return;
+                }
+                log(`Enter command > ${command}\n`, null, true);
+
+                if (command === 'exit') {
+                    const { closeServer } = require('./server');
+                    logInfo('Server is shutting down...');
+                    closeServer();
+                    process.exit(0);
+                }
+
+                // handle the command
+                const { handleCommandWithArgs } = require('./handlers');
+                await handleCommandWithArgs(command, args, rl);
                 prompt();
-                return;
+            } catch (error) {
+                logError(`Error: ${error.message}`);
+                prompt();
             }
-            log(`Enter command > ${command}\n`, null, true);
-
-            if (command === 'exit') {
-                const { closeServer } = require('./server');
-                logInfo('Server is shutting down...');
-                closeServer();
-                process.exit(0);
-            }
-
-            // handle the command
-            const { handleCommandWithArgs } = require('./handlers');
-            await handleCommandWithArgs(command, args, rl);
-            prompt();
-        } catch (error) {
-            logError(`Error: ${error.message}`);
-            prompt();
-        }
-    });
+        });
+    } catch (error) {
+        logError(`Exception: ${error.message}`);
+    }
 };
 
 /**
