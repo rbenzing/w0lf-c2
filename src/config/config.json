@@ -2,20 +2,21 @@
   "version": "0.2.1",
   "server": {
     "host": "127.0.0.1",
-    "method": "tcp",
-    "salt": "a8e12f06e48c0819bb3f5226c1dcbc49"
+    "method": "tcp"
   },
   "channels": {
     "tcp": {
       "port": 54678
     },
     "https": {
+      "port": 443,
       "cert": {
         "key": "server.key",
         "cert": "server.cert"
       }
     },
     "http2": {
+      "port": 80,
       "cert": {
         "key": "server.key",
         "cert": "server.cert"
@@ -36,7 +37,10 @@
     }
   },
   "encryption": {
-    "algorithms": ["aes-256-gcm", "aes-256-cbc"]
+    "algorithms": [
+      "aes-256-gcm",
+      "aes-256-cbc"
+    ]
   },
   "logging": {
     "enable": true,
@@ -45,11 +49,14 @@
     "maxlines": 20000
   },
   "data": {
-      "chunk_size": 1024
+    "chunk_size": 1024
   },
   "path": {
-      "downloads": "downloads",
-      "plugins": "plugins",
-      "logs": "logs"
+    "downloads": "downloads",
+    "plugins": "plugins",
+    "logs": "logs"
+  },
+  "rateLimit": {
+    "maxRequests": 10
   }
 }

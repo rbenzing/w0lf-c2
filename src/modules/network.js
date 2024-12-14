@@ -27,7 +27,7 @@ const getServerPort = () => {
 
 /**
  * Implement rate limiting per IP
- * @param {*} ipAddress 
+ * @param {string} ipAddress 
  * @param {*} rateLimits 
  * @returns 
  */
