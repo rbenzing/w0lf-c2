@@ -20,7 +20,7 @@ const setClientActive = (sessionId) => {
         log('The active session ID has been cleared.', undefined);
         return;
     }
-    let clientExists = activeClients.get(sessionId);
+    let clientExists = getClient(sessionId);
     if (sessionId && clientExists && sessionId.length === 32) {
         activeClientSessionId = sessionId;
         log(`${activeClientSessionId} is now the active session.`, undefined);
@@ -37,7 +37,7 @@ const showClient = () => {
     if (!activeClientSessionId) {
         throw new Error(`You must set a session ID first.`);
     }
-    const client = activeClients.get(activeClientSessionId);
+    const client = getClient(activeClientSessionId);
     if (!client) {
         throw new Error(`Invalid session ID: ${activeClientSessionId}`);
     }
@@ -101,20 +101,18 @@ const showActiveClients = () => {
  * @param {string} command 
  */
 const executeClientCommand = async (client, command) => {
-    const socket = client.socket;
-    const sessionId = client.sessionId;
     let cipher = 'aes-256-gcm';
     // powershell needs cbc instead of gcm
     if (client.type === 'ps') {
         cipher = 'aes-256-cbc';
     }
-    const payload = await encryptData(command, sessionId, cipher);
+    const payload = await encryptData(command, client.sessionId, cipher);
     if (payload) {
         return new Promise((resolve) => {
-            if (socket.write(payload) === true) {
+            if (client.socket.write(payload) === true) {
                 // wait
             } else {
-                socket.once("drain", resolve(true));
+                client.socket.once("drain", resolve(true));
             }
         });
     } else {
@@ -130,7 +128,7 @@ const executeClientCommand = async (client, command) => {
 const sendClientCommand = async (command, args) => {
     const sessionId = activeClientSessionId || null;
     if (sessionId) {
-        const client = activeClients.get(sessionId);
+        const client = getClient(sessionId);
         if (!client) {
             logError(`Invalid client session ID or client not found.`);
             return;

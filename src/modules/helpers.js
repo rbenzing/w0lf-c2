@@ -4,12 +4,13 @@ const { getServerPort } = require('./network');
 const { getLoadedPlugins } = require('./plugins');
 
 const config = require('./config');
+
 var startTime = null;
 
 /**
  * Returns the formatted uptime in hours, minutes and seconds
  * @param {number} milliseconds 
- * @returns string
+ * @returns {string}
  */
 const formatTime = (milliseconds) => {
     const totalSeconds = Math.floor(milliseconds / 1000);
@@ -22,7 +23,8 @@ const formatTime = (milliseconds) => {
 
 /**
  * Returns the server uptime
- * @returns string
+ * @param {string} startTime 
+ * @returns {string}
  */
 const getUptime = (startTime) => {
     const currentTime = Date.now();

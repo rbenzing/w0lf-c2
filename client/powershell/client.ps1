@@ -486,7 +486,7 @@ function Connect-ToServer {
                 }
             } else {
 
-                if ($global:client -ne $null) {
+                if ($null -ne $global:client) {
                     $global:client.Close()
                     $global:client.Dispose()
                     $global:client = $null
@@ -509,7 +509,7 @@ function Connect-ToServer {
             Write-Log "Exception occurred: $($_.Exception.Message)"
         }
         finally {
-            if ($global:retryMode -and $global:client -ne $null) {
+            if ($global:retryMode -and $null -ne $global:client) {
                 Write-Log "Connection to server closing. Retrying..."
 
                 # Clean up client connection
@@ -544,7 +544,7 @@ try {
     }
 
     # Create beacon interval
-    if ($global:beaconIntervalInstance -eq $null) {
+    if ($null -eq $global:beaconIntervalInstance) {
         $beaconInterval = Get-Random -Minimum $global:BEACON_MIN_INTERVAL -Maximum $global:BEACON_MAX_INTERVAL
         $global:beaconIntervalInstance = New-Object System.Timers.Timer($beaconInterval)
         $global:beaconIntervalInstance.AutoReset = $true

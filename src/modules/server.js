@@ -4,6 +4,7 @@ const { loadAndRegisterPlugins } = require('./plugins');
 const { clearActiveSession, endClientSessions } = require('./clients');
 const { closeSocketServer } = require('../channels/socket');
 const { prompt, listenServerConsole } = require('./readline');
+
 const config = require('./config');
 
 /**
