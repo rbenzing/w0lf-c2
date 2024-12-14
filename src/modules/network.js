@@ -1,14 +1,24 @@
 const { networkInterfaces } = require("node:os");
-const config = require('../config/configLoader');
+const config = require('./config');
 
+/**
+ * Returns the active channel port set in config
+ * @returns number
+ */
 const getServerPort = () => {
     let port = 80;
     switch(config.server.method) {
         case 'tcp':
             port = config.channels.tcp.port;
             break;
-        case 'https':
-            port = config.channels.tcp.port;
+        case 'http2':
+            port = config.channels.http2.port;
+            break;
+        case 'tls':
+            port = config.channels.https.port;
+            break;
+        case 'udp':
+            port = config.channels.udp.port;
             break;
         default:
     }

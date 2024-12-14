@@ -2,14 +2,14 @@ const { pbkdf2, randomBytes, createHash, createCipheriv, createHmac, createDecip
 const { promisify } = require('node:util');
 const { isIPv6, isIPv4 } = require('node:net')
 
-const config = require('../config/configLoader');
+const config = require('./config');
 
 const pbkdf2_promise = promisify(pbkdf2);
 const randomBytes_promise = promisify(randomBytes);
 
 /**
- * Gets the client Session ID
- * IPv4 and IPv6
+ * Gets the client Session ID for IPv4 and IPv6
+ * @param {string} ipAddress 
  * @returns 
  */
 const getSessionId = (ipAddress) => {

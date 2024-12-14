@@ -5,7 +5,7 @@ let config = {};
 
 const loadConfig = () => {
   try {
-    const configPath = path.resolve(__dirname, 'config.json');
+    const configPath = path.resolve(__dirname, '../config/config.json');
     const configFile = fs.readFileSync(configPath, 'utf8');
     config = JSON.parse(configFile);
   } catch (error) {

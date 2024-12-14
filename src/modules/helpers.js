@@ -1,12 +1,15 @@
 
 const { log } = require('./logging');
 const { getServerPort } = require('./network');
-const config = require('../config/configLoader');
+const { getLoadedPlugins } = require('./plugins');
+
+const config = require('./config');
+var startTime = null;
 
 /**
- * Format the uptime to hours, minutes and seconds
- * @param {*} milliseconds 
- * @returns 
+ * Returns the formatted uptime in hours, minutes and seconds
+ * @param {number} milliseconds 
+ * @returns string
  */
 const formatTime = (milliseconds) => {
     const totalSeconds = Math.floor(milliseconds / 1000);
@@ -18,19 +21,19 @@ const formatTime = (milliseconds) => {
 };
 
 /**
- * Get the server uptime
- * @returns 
+ * Returns the server uptime
+ * @returns string
  */
 const getUptime = (startTime) => {
     const currentTime = Date.now();
     const uptimeMillis = currentTime - startTime;
-    return `Uptime: ${formatTime(uptimeMillis)}`;
+    return formatTime(uptimeMillis);
 };
 
 /**
  * Get the w0lf c2 startup ascii
  */
-const getHowel = (logStream) => {
+const getHowel = () => {
     log(`⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠁⠸⢳⡄⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⠃⠀⠀⢸⠸⠀⡠⣄⠀⠀⠀⠀⠀
@@ -44,59 +47,62 @@ const getHowel = (logStream) => {
 ⠀⠀⠀⢀⣴⠫⠤⣶⣿⢀⡏⠀⠀⠘⢸⡟⠋⠀⠀⠀⠀⠀⠀⠀⠀⢣⠀⠀⠀⠀
 ⠐⠿⢿⣿⣤⣴⣿⣣⢾⡄⠀⠀⠀⠀⠳⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢳⠀⠀⠀
 ⠀⠀⠀⣨⣟⡍⠉⠚⠹⣇⡄⠀⠀⠀⠀⠀⠀⠀⠀⠈⢦⠀⠀⢀⡀⣾⡇⠀⠀
-⠀⠀⠀⢠⠟⣹⣧⠃⠀⠀⢿⢻⡀⢄⠀⠀⠀⠀⠐⣦⡀⣸⣆⠀⣾⣧⣯⢻`, undefined, logStream);
+⠀⠀⠀⢠⠟⣹⣧⠃⠀⠀⢿⢻⡀⢄⠀⠀⠀⠀⠐⣦⡀⣸⣆⠀⣾⣧⣯⢻`, undefined);
 };
 
 /**
  * Get the w0lf c2 startup text
  */
-const getWolfText = (logStream) => {
+const getWolfText = () => {
     log(`██╗⠘⣰⣿⣿██╗ ██████╗ ██╗⢶⣿⡎⠻⣆███████╗     ██████╗██████╗ 
 ██║⡟⡿⢿⡿██║██╔═████╗██║⠙⢿⡄⡈⢆██╔════╝    ██╔════╝╚════██╗
 ██║ █╗ ██║██║██╔██║██║⠀⡇⢹⢿⡀█████╗      ██║      █████╔╝
 ██║███╗██║████╔╝██║██║⠀⠀⠼⠇⠁██╔══╝      ██║     ██╔═══╝ 
 ╚███╔███╔╝╚██████╔╝███████╗██║         ╚██████╗███████╗
- ╚══╝╚══╝  ╚═════╝ ╚══════╝╚═╝          ╚═════╝╚══════╝`, undefined, logStream);
+ ╚══╝╚══╝  ╚═════╝ ╚══════╝╚═╝          ╚═════╝╚══════╝`, undefined);
 };
 
 /**
  * Shows the startup info
  */
-const getStartup = (startTime, logStream) => {
-    getWolfText(logStream);
-    log([`Ver. ${config.version}`, ' | ',`Listening on: ${config.server.host}:${getServerPort()}`, ' | ', `${getUptime(startTime)}`], [94, 97, 93, 97, 93], logStream);
+const getStartup = () => {
+    getWolfText();
+    startTime = Date.now();
+    log([`Ver. ${config.version}`, ' | ',`Listening on: ${config.server.host}:${getServerPort()}`, ' | ', `Uptime: ${getUptime(startTime)}`], [94, 97, 93, 97, 93]);
 };
 
 /**
  * Displays the active plugins
  */
-const displayActivePlugins = (loadedPlugins, logStream) => {
-    log("\nACTIVE PLUGINS:", 93, logStream);
+const displayActivePlugins = () => {
+    const loadedPlugins = getLoadedPlugins();
+    log("\nACTIVE PLUGINS:", 93);
     Array.from(loadedPlugins).forEach(plugin => {
         const [ name, module ] = plugin;
-        log(["Type:", `\t\t${module.type} plugin`], [96, 97], logStream);
-        log(["Name:", `\t\t${name}`], [96, 97], logStream);
-        log(["Description:", `\t${module.description}`], [96, 97], logStream);
-        log(["Commands:", `\t${Object.keys(module.commands).join(', ')}\n`], [96, 97], logStream);
+        log(["Type:", `\t\t${module.type} plugin`], [96, 97]);
+        log(["Name:", `\t\t${name}`], [96, 97]);
+        log(["Description:", `\t${module.description}`], [96, 97]);
+        log(["Commands:", `\t${Object.keys(module.commands).join(', ')}\n`], [96, 97]);
     });
 };
 
 /**
  * Displays the server commands
  */
-const displayCommandOptions = (loadedPlugins, logStream) => {
-    log("\nSERVER COMMANDS:", 93, logStream);
-    log(["help\t\t", "Display available commands."], [96, 97], logStream);
-    log(["plugins \t", "List all active plugins."], [96, 97], logStream);
-    log(["clients \t", "List all active clients."], [96, 97], logStream);
-    log(["uptime\t\t", "Display server uptime."], [96, 97], logStream);
-    log(["set\t\t", "Sets the client session to make active."], [96, 97], logStream);
-    log(["clear\t\t", "Clear the console."], [96, 97], logStream);
-    log(["exit\t\t", "Exit the server."], [96, 97], logStream);
+const displayCommandOptions = () => {
+    const loadedPlugins = getLoadedPlugins();
+    log("\nSERVER COMMANDS:", 93);
+    log(["help\t\t", "Display available commands."], [96, 97]);
+    log(["plugins \t", "List all active plugins."], [96, 97]);
+    log(["clients \t", "List all active clients."], [96, 97]);
+    log(["uptime\t\t", "Display server uptime."], [96, 97]);
+    log(["set\t\t", "Sets the client session to make active."], [96, 97]);
+    log(["clear\t\t", "Clear the console."], [96, 97]);
+    log(["exit\t\t", "Exit the server."], [96, 97]);
     if (loadedPlugins) {
-        log("\nPLUGINS:", 93, logStream);
+        log("\nPLUGINS:", 93);
         for (const [pluginName, pluginModule] of loadedPlugins.entries()) {
-            log(`${pluginName}: ${pluginModule.description}`, 93, logStream);
+            log(`${pluginName}: ${pluginModule.description}`, 93);
             if (pluginModule.commands) {
                 let cnt = 0;
                 Object.keys(pluginModule.commands).forEach((command) => {
@@ -112,7 +118,7 @@ const displayCommandOptions = (loadedPlugins, logStream) => {
                     if (cnt === Object.keys(pluginModule.commands).length) {
                         format2 = "\n";
                     }
-                    log([`${command}${format}`, `${pluginModule.commands[command].description}${format2}`], [96, 97], logStream);
+                    log([`${command}${format}`, `${pluginModule.commands[command].description}${format2}`], [96, 97]);
                 });
             }
         }

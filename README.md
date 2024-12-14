@@ -1,5 +1,9 @@
 # C2 Server
 
+- **Author**: Russell Benzing
+- **Last Updated**: 12/14/2024
+- **License**: GPL-3.0
+
 ## Overview
 
 This repository serves as a educational reference and contains the implementation of a Command and Control (C&C) server used for managing and controlling remote clients. The server facilitates communication with these clients, allowing for command execution, data retrieval, and other operations as needed.
