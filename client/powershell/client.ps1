@@ -462,7 +462,7 @@ function Connect-ToServer {
 
     while (-not $global:exitProcess) {
         try {
-            if ($global:client -ne $null -and $global:client.Connected) {
+            if ($null -ne $global:client -and $global:client.Connected) {
                 # Connection is already open, continue using it
                 $tcpStream = $global:client.GetStream()
 

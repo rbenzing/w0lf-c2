@@ -2,7 +2,7 @@ const { promisify } = require('node:util');
 const { mkdir, writeFile, existsSync } = require('node:fs');
 const { log, logInfo, logError, logSuccess } = require('./logging');
 const { getClientCommands, getServerCommands } = require('./commands');
-const { sendClientCommand, showActiveClients, showClient, setClientActive } = require('./clients');
+const { sendClientCommand, showActiveClients, showClient, setClientActive, upsertClientSession } = require('./clients');
 const { displayCommandOptions, displayActivePlugins, getUptime } = require('./helpers');
 const { getLoadedPlugins } = require('./plugins');
 const { clearServerConsole } = require('./readline');
@@ -16,7 +16,7 @@ const config = require('./config');
 
 /**
  * Beacon handler
- * @param {*} response 
+ * @param {BeaconResponse} response 
  * @param {Client} client
  */
 const handleBeacon = (response, client) => {
@@ -26,14 +26,17 @@ const handleBeacon = (response, client) => {
     const timeOptions = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true };
     const formattedDate = date.toLocaleDateString('en-US', dateOptions);
     const formattedTime = date.toLocaleTimeString('en-US', timeOptions);
-    client.lastSeen = `${formattedDate} ${formattedTime}`;
-    client.active = true;
-    client.type = response.type;
-    client.version = response.version;
-    client.platform = response.platform;
-    client.arch = response.arch; 
-    client.osver = response.osver; 
-    client.hostname = response.hostname;
+
+    upsertClientSession(client.sessionId, {
+        lastSeen: `${formattedDate} ${formattedTime}`,
+        active: true,
+        type: response.type,
+        version: response.version,
+        platform: response.platform,
+        arch: response.arch, 
+        osver: response.osver,
+        hostname: response.hostname
+    });
 };
 
 /**

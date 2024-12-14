@@ -17,3 +17,16 @@
         hostname: String
     }} Client
  */
+
+/**
+ * The beacon response object definition
+ * @typedef {{
+        version: String,
+        arch: String,
+        hostname: String,
+        type: String,
+        platform: String,
+        osver: String,
+        beacon: Boolean
+    }} BeaconResponse
+ */

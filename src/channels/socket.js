@@ -20,11 +20,11 @@ const server = createServer((socket) => {
         const { decryptData } = require('../modules/encdec');
         const { handleDownloadResponse, handleResponse, handleBeacon } = require('../modules/handlers');
         
+        const client = getClient(sessionId);
+
         try {
             if (payload.length >= config.data.chunk_size || payload.includes('--FIN--')) {
                 // chunk mode
-                const client = getClient(sessionId);
-                
                 upsertClientSession(sessionId, {waiting: true, buffer: client.buffer += payload})
                 
                 client.waiting = true;
