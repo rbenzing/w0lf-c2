@@ -2,15 +2,15 @@ const { pbkdf2, randomBytes, createHash, createCipheriv, createHmac, createDecip
 const { promisify } = require('node:util');
 const { isIPv6, isIPv4 } = require('node:net')
 
-const config = require('../config/configLoader');
+const config = require('./config');
 
 const pbkdf2_promise = promisify(pbkdf2);
 const randomBytes_promise = promisify(randomBytes);
 
 /**
- * Gets the client Session ID
- * IPv4 and IPv6
- * @returns 
+ * Gets the client Session ID for IPv4 and IPv6
+ * @param {string} ipAddress 
+ * @returns {string}
  */
 const getSessionId = (ipAddress) => {
     let sum = 0;
@@ -30,17 +30,18 @@ const getSessionId = (ipAddress) => {
  * PBKDF2 Encryption
  * @param {string} data 
  * @param {string} sharedKey 
- * @param {string} [cipher='aes-256-gcm'] 
+ * @param {string} cipher
  * @returns {Promise<string>}
  */
 const encryptData = async (data, sharedKey, cipher = 'aes-256-gcm') => {
-    if (typeof data !== 'string' || typeof sharedKey !== 'string') {
-        throw new TypeError('Data and shared key must be strings');
-    }
-    if (!config.encryption.algorithms.includes(cipher)) {
-        throw new TypeError(`Unsupported cipher. Supported ciphers are: ${config.encryption.algorithms.join(', ')}`);
-    }
     try {
+        if (typeof data !== 'string' || typeof sharedKey !== 'string') {
+            throw new TypeError('Data and shared key must be strings');
+        }
+        if (!config.encryption.algorithms.includes(cipher)) {
+            throw new TypeError(`Unsupported cipher. Supported ciphers are: ${config.encryption.algorithms.join(', ')}`);
+        }
+        
         const salt = await randomBytes_promise(32);
         const iv = await randomBytes_promise(cipher.endsWith('gcm') ? 12 : 16);
         const key = await pbkdf2_promise(sharedKey, salt, 200000, 32, 'sha512');

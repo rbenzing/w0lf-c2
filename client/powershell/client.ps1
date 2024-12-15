@@ -12,7 +12,7 @@ $global:sentFirstBeacon = $false
 $global:sessionId = $null
 $global:logEnabled = $true
 $global:chunkSize = 1024
-$global:address = '10.0.0.127'
+$global:address = '127.0.0.1'
 $global:port = 54678
 $global:maxRetries = 5
 $global:retryMode = $false;
@@ -462,7 +462,7 @@ function Connect-ToServer {
 
     while (-not $global:exitProcess) {
         try {
-            if ($global:client -ne $null -and $global:client.Connected) {
+            if ($null -ne $global:client -and $global:client.Connected) {
                 # Connection is already open, continue using it
                 $tcpStream = $global:client.GetStream()
 
@@ -486,7 +486,7 @@ function Connect-ToServer {
                 }
             } else {
 
-                if ($global:client -ne $null) {
+                if ($null -ne $global:client) {
                     $global:client.Close()
                     $global:client.Dispose()
                     $global:client = $null
@@ -509,7 +509,7 @@ function Connect-ToServer {
             Write-Log "Exception occurred: $($_.Exception.Message)"
         }
         finally {
-            if ($global:retryMode -and $global:client -ne $null) {
+            if ($global:retryMode -and $null -ne $global:client) {
                 Write-Log "Connection to server closing. Retrying..."
 
                 # Clean up client connection
@@ -535,7 +535,7 @@ function Connect-ToServer {
 try {
     # Create a writable stream for logging
     if ($global:logEnabled) {
-        $logPath = 'logs\client.log'
+        $logPath = "$PSScriptRoot\logs\client.log"
         $logDir = [System.IO.Path]::GetDirectoryName($logPath)
         if (-not $logDir -or -not (Test-Path -Path $logDir)) {
             New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -544,7 +544,7 @@ try {
     }
 
     # Create beacon interval
-    if ($global:beaconIntervalInstance -eq $null) {
+    if ($null -eq $global:beaconIntervalInstance) {
         $beaconInterval = Get-Random -Minimum $global:BEACON_MIN_INTERVAL -Maximum $global:BEACON_MAX_INTERVAL
         $global:beaconIntervalInstance = New-Object System.Timers.Timer($beaconInterval)
         $global:beaconIntervalInstance.AutoReset = $true

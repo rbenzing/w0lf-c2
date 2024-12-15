@@ -249,7 +249,6 @@ def connect_to_server():
         client.connect((SERVER_ADDRESS, SERVER_PORT))
         log_it(f"Client {CVER} connected.")
         get_session_id()
-        send_beacon()
         
         def beacon():
             beacon_interval = random.randint(BEACON_MIN_INTERVAL, BEACON_MAX_INTERVAL)

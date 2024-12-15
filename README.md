@@ -1,5 +1,9 @@
 # C2 Server
 
+- **Author**: Russell Benzing
+- **Last Updated**: 12/14/2024
+- **License**: GPL-3.0
+
 ## Overview
 
 This repository serves as a educational reference and contains the implementation of a Command and Control (C&C) server used for managing and controlling remote clients. The server facilitates communication with these clients, allowing for command execution, data retrieval, and other operations as needed.
@@ -14,6 +18,7 @@ This repository serves as a educational reference and contains the implementatio
 - **Pluggable**: Support for additional commands with plugins.
 
 ## Setup Instructions
+I tried to make the installation process as simple as possible
 
 1. **Prerequisites**:
    - Node.js 18+ and npm installed.
@@ -23,6 +28,10 @@ This repository serves as a educational reference and contains the implementatio
    git clone <repository_url>
    cd w0lf-c2
    npm install
+
+3. **Running**:
+   ```bash
+   npm run start
 
 ## Features
 
@@ -40,7 +49,10 @@ This repository serves as a educational reference and contains the implementatio
 
 ## In The Works
 
-- Additional communication channels (https, http2, udp, tls)
+- Expand on WMI Communication/Info Gathering
+  ```powershell
+  Get-WmiObject Win32_OperatingSystem | Select-Object -ExpandProperty SerialNumber
+- Additional communication channels (http2, udp, tls)
 - Add more LOLBas commands
    ```bash
    # 1. certutil.exe for Downloading Files

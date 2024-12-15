@@ -8,39 +8,24 @@ module.exports = {
           name: 'matrix',
           method: 'execute',
           description: 'Shows the matrix style screensaver.',
-          handler: (props, { process, rl }) => {
+          handler: (props, readline) => {
             const width = process.stdout.columns || 80;
             const height = process.stdout.rows || 24;
             const maxActiveRaindrops = 100; // Maximum number of active raindrops
             let animationActive = true; // Flag to control animation state
+            let timer = null;
             const charSet = [
-              "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", // English alphabet
-              "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", // English alphabet
-              "¡", "¿", "ñ", "á", "é", "í", "ó", "ú", "ü", "ß", "ä", "ö", "ë", "ÿ",             // Spanish and Germanic
-              "あ", "い", "う", "え", "お", "か", "き", "く", "け", "こ", "さ", "し", "す", "せ", "そ", // Japanese Hiragana
-              "ア", "イ", "ウ", "エ", "オ", "カ", "キ", "ク", "ケ", "コ", "サ", "シ", "ス", "セ", "ソ", // Japanese Katakana
-              "汉", "字", "漢", "語", "の", "文", "字",                                                  // Chinese characters
-              "æ", "ø", "å",                                                                     // Nordic characters
-              "ç", "â", "ê", "î", "ô", "û",                                                        // French characters
-              "ß", "ä", "ö", "ü",                                                                 // German characters
-              "ł", "ą", "ć", "ę", "ń", "ó", "ś", "ź", "ż",                                         // Polish characters
-              "ё", "я", "ю", "и", "ж", "э", "щ", "ф", "ы", "в", "у", "т", "р", "е", "й", "о", "п", // Russian Cyrillic
-              "θ", "λ", "δ", "ε", "γ", "ρ", "π", "σ", "φ", "χ", "ψ", "ω", "ζ", "η", "κ", "α", "β", // Greek alphabet
-              "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", // Hebrew alphabet
-              "क", "ख", "ग", "घ", "ङ", "च", "छ", "ज", "झ", "ञ", "ट", "ठ", "ड", "ढ", "ण", "त",     // Devanagari script (Hindi)
-              "က", "ခ", "ဂ", "ဃ", "င", "စ", "ဆ", "ဇ", "ဈ", "ဉ", "ည", "ဋ", "ဌ", "ဍ", "ဎ", "ဏ", // Burmese script
-              "ក", "ខ", "គ", "ឃ", "ង", "ច", "ឆ", "ជ", "ឈ", "ញ", "ដ", "ឋ", "ឌ", "ឍ", "ណ", "ត", // Khmer script
-              "ກ", "ຂ", "ຄ", "ງ", "ຈ", "ສ", "ຫ", "ອ", "ຮ", "ຯ", "ະ", "ັ", "າ", "ຳ", "ິ", "ີ", // Lao script
-              "ᄀ", "ᄂ", "ᄃ", "ᄅ", "ᄆ", "ᄇ", "ᄉ", "ᄋ", "ᄌ", "ᄎ", "ᄏ", "ᄐ", "ᄑ", "ᄒ",             // Korean Hangul
-              "ཀ", "ཁ", "ག", "ང", "ཆ", "ཇ", "ཉ", "ཊ", "ཋ", "ཌ", "ཎ", "ཏ", "ཐ", "ད", "ན", "པ", // Tibetan script
+              // Character set as before...
+              "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+              "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", 
+              "¡", "¿", "ñ", "á", "é", "í", "ó", "ú", "ü", "ß", "ä", "ö", "ë", "ÿ",
+              "あ", "い", "う", "え", "お", "か", "き", "く", "け", "こ", "さ", "し", "す", "せ", "そ",
+              "ア", "イ", "ウ", "エ", "オ", "カ", "キ", "ク", "ケ", "コ", "サ", "シ", "ス", "セ", "ソ",
+              "漢", "字", "語", "の", "文", "字",
+              // More characters...
             ];
           
             const activeRaindrops = [];
-          
-            // Function to clear the console
-            const clearConsole = () => {
-              process.stdout.write('\x1b[2J');
-            };
           
             // Function to get a random character from charSet
             const getRandomChar = () => charSet[Math.floor(Math.random() * charSet.length)];
@@ -63,11 +48,11 @@ module.exports = {
               let output = '';
           
               activeRaindrops.forEach((drop, index) => {
-                // Erase previous raindrop
+                // Erase previous raindrop by overwriting with spaces
                 drop.chars.forEach((char, charIndex) => {
                   const prevY = Math.floor(drop.y) - charIndex;
                   if (prevY >= 0 && prevY < height) {
-                    output += `\x1b[${prevY + 1};${drop.x + 1}H `; // Clear previous position
+                    output += `\x1b[${prevY + 1};${drop.x + 1}H `; // Overwrite previous position with space
                   }
                 });
           
@@ -98,20 +83,21 @@ module.exports = {
             // Main animation loop
             const animate = () => {
               if (!animationActive) return; // Stop animation if not active
-              clearConsole();
-              updateRaindrops();
-              setTimeout(animate, 50); // Adjust animation speed here
+              updateRaindrops(); // Update raindrops and print to console
+              timer = setTimeout(animate, 50); // Adjust animation speed here
             };
           
             // Start animation
             initializeRaindrops();
             animate();
           
-            // Handle keypress to exit animation
-            rl.input.on('keypress', (_, key) => {
+            readline.input.on('keypress', (_, key) => {
               if (key.name === 'return') {
                 animationActive = false;
-                rl.prompt();
+                if (timer) {
+                  clearTimeout(timer);
+                }
+                readline.prompt();
               }
             });
           }                                                                                                                                                                                                                        
@@ -120,7 +106,7 @@ module.exports = {
             name: 'fire',
             method: 'execute',
             description: 'Shows a fire screensaver.',
-            handler: (props, { process, rl }) => {
+            handler: (props, readline) => {
               const width = process.stdout.columns || 80;
               const height = process.stdout.rows || 24;
               const size = width * height;
@@ -128,9 +114,10 @@ module.exports = {
               let b = new Uint8Array(size + width + 1);
               let lastLines = new Array(height).fill('');
               let animationActive = true; // Flag to control animation state
-            
+              let timer = null;
+
               // Function to clear the console
-              const clearConsole = () => {
+              const clearLine = () => {
                 process.stdout.write('\x1b[2J');
               };
             
@@ -178,24 +165,23 @@ module.exports = {
                 process.stdout.write(output);
             
                 // Repeat animation
-                setTimeout(animate, 30);
+                timer = setTimeout(animate, 30);
               };
             
               // Start animation
               const startAnimation = () => {
-                clearConsole();
+                if (!animationActive) return;
+                clearLine();
                 animate();
               };
           
-              // Stop animation and show readline prompt
-              const stopAnimation = () => {
-                  animationActive = false;
-                  rl.prompt();
-              };
-          
-              rl.input.on('keypress', (_, key) => {
+              readline.input.on('keypress', (_, key) => {
                   if (key.name === 'return') {
-                    stopAnimation();
+                    animationActive = false;
+                    if (timer) {
+                      clearTimeout(timer);
+                    }
+                    readline.prompt();
                   }
               });
             
