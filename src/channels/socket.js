@@ -39,6 +39,7 @@ const server = createServer((socket) => {
                     if (response.download) {
                         await handleDownloadResponse(response);
                     } else {
+                        console.log('response', response);
                         handleResponse(response);
                     }
                     
@@ -59,6 +60,7 @@ const server = createServer((socket) => {
                 } else if (response.error) {
                     logError(response.error);
                 } else {
+                    console.log('response', response);
                     handleResponse(response);
                 }
             }

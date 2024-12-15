@@ -3,7 +3,6 @@
  * @typedef {{
         sessionId: String,
         socket: Socket,
-        readline: Interface,
         address: String,
         lastSeen: Date,
         active: Boolean,

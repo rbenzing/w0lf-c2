@@ -11,24 +11,6 @@ const rl = createInterface({
 });
 
 /**
- * Creates the client console interface using readline
- * @param {Client} client
- * @returns Interface
- */
-const createClientConsole = (client) => {
-    try {
-        const clientRl = createInterface({
-            input: client.socket.stdin,
-            output: client.socket.stdout,
-            prompt: `\x1b[33m${client.address} > \x1b[0m`
-        });
-        return clientRl;
-    } catch (error) {
-        logError(`Exception: ${error.message}`);
-    }
-};
-
-/**
  * Runs the prompt for Readline
  */
 const prompt = () => {
@@ -62,7 +44,6 @@ const listenServerConsole = () => {
                 // handle the command
                 const { handleCommandWithArgs } = require('./handlers');
                 await handleCommandWithArgs(command, args, rl);
-                prompt();
             } catch (error) {
                 logError(`Error: ${error.message}`);
                 prompt();
@@ -102,7 +83,6 @@ const getReadlineInstance = () => {
 module.exports = {
     prompt,
     listenServerConsole,
-    createClientConsole,
     clearServerConsole,
     endReadline,
     getReadlineInstance

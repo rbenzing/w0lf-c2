@@ -49,14 +49,17 @@
     "maxlines": 20000
   },
   "data": {
-    "chunk_size": 1024
+    "chunk_size": 1024,
+    "persist_clients": false
   },
   "path": {
     "downloads": "downloads",
     "plugins": "plugins",
-    "logs": "logs"
+    "logs": "logs",
+    "clientdb": "config"
   },
   "rateLimit": {
-    "maxRequests": 10
+    "maxRequests": 100,
+    "maxPerMinute": 10
   }
 }

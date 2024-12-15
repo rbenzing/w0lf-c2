@@ -5,7 +5,7 @@ const { getClientCommands, getServerCommands } = require('./commands');
 const { sendClientCommand, showActiveClients, showClient, setClientActive, upsertClientSession } = require('./clients');
 const { displayCommandOptions, displayActivePlugins, getUptime } = require('./helpers');
 const { getLoadedPlugins } = require('./plugins');
-const { clearServerConsole } = require('./readline');
+const { clearServerConsole, prompt } = require('./readline');
 
 require('../typedef/definitions');
 
@@ -79,12 +79,12 @@ const handleResponse = (response) => {
         if (data.type === "Buffer") {
             // handle buffer response
             const response = Buffer.from(data.data).toString('utf8').trim();
-            log(response, undefined);
+            log(response);
         } else {
             if (typeof data !== 'string') {
                 data = JSON.stringify(data);
             }
-            log(data.toString('utf8').trim(), undefined);
+            log(data.toString('utf8').trim());
         }
     } else if (response.message) {
         logInfo(response.message);
@@ -104,15 +104,19 @@ const handleCommandWithArgs = async (command, properties, readline) => {
         const clientCommands = getClientCommands();
         const serverCommands = getServerCommands();
         const loadedPlugins = getLoadedPlugins();
-        if (clientCommands.includes(command.split(' ')[0]) ||
-            serverCommands.includes(command.split(' ')[0])) {
+        let cmd = command.split(' ')[0].trim();
+
+        if (clientCommands.includes(cmd) || serverCommands.includes(cmd)) {
             let handledByPlugin = false;
+
             for (const [pluginName, pluginModule] of loadedPlugins.entries()) {
-                if (pluginModule.commands && pluginModule.commands[command]) {
-                    const pluginCommand = pluginModule.commands[command];
+                if (pluginModule.commands && pluginModule.commands[cmd]) {
+                    const pluginCommand = pluginModule.commands[cmd];
+                    
                     if (pluginModule.type === 'server') {
                         pluginCommand.handler(properties, readline);
                     } else if (pluginModule.type === 'client') {
+                        
                         switch (pluginCommand.method) {
                             case 'payload-ps':
                                 await sendClientCommand('ps', [
@@ -131,10 +135,12 @@ const handleCommandWithArgs = async (command, properties, readline) => {
                             default:
                         }
                     }
+
                     handledByPlugin = true;
                     break;
                 }
             }
+
             if (!handledByPlugin) {
                 switch (command) {
                     case 'clear':
@@ -162,7 +168,11 @@ const handleCommandWithArgs = async (command, properties, readline) => {
                         logInfo('Invalid command. Type "help" to see available commands.');
                 }
             }
+        } else {
+            logInfo('Invalid command. Type "help" to see available commands.');
         }
+
+        prompt();
     } catch (error) {
         logError(`Exception: ${error.message}`);
     }
