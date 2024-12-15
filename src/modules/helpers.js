@@ -69,8 +69,7 @@ const getWolfText = () => {
  */
 const getStartup = () => {
     getWolfText();
-    startTime = Date.now();
-    log([`Ver. ${config.version}`, ' | ',`Listening on: ${config.server.host}:${getServerPort()}`, ' | ', `Uptime: ${getUptime(startTime)}`], [94, 97, 93, 97, 93]);
+    log([`Ver. ${config.version}`, ' | ',`Listening on: ${config.server.host}:${getServerPort()}`, ' | ', `Uptime: ${getUptime(Date.now())}`], [94, 97, 93, 97, 93]);
 };
 
 /**
