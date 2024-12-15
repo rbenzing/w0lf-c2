@@ -45,7 +45,7 @@
   "logging": {
     "enable": true,
     "fileLogging": true,
-    "filename": "server.log",
+    "filename": "server",
     "maxlines": 20000
   },
   "data": {

@@ -20,8 +20,7 @@ const createLogStream = async () => {
         if (!existsSync(LOGS_FOLDER)) {
             await mkdir_promise(LOGS_FOLDER);
         }
-        const filename = config.logging.filename.split('.')[0];
-        const logFilePath = join(LOGS_FOLDER, `${filename}_${logFileIndex}.log`);
+        const logFilePath = join(LOGS_FOLDER, `${config.logging.filename}_${logFileIndex}.log`);
         logStream = createWriteStream(logFilePath, { flags: 'a' });
     }
 };

