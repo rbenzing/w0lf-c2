@@ -1,4 +1,4 @@
-const { logInfo }  = require('./logging');
+const { logInfo, logError }  = require('./logging');
 
 require('../typedef/definitions');
 

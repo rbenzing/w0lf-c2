@@ -7,6 +7,8 @@ const { prompt, listenServerConsole } = require('./readline');
 
 const config = require('./config');
 
+const startTime = Date.now();
+
 /**
  * Starts the server
  */
@@ -38,7 +40,7 @@ const startServer = async () => {
 
     // startup logo and info
     getHowel();
-    getStartup();
+    getStartup(startTime);
 
     // register plugins
     await loadAndRegisterPlugins();
@@ -87,5 +89,6 @@ const shutdown = () => {
 module.exports = {
     closeServer,
     shutdown,
-    startServer
+    startServer,
+    startTime
 };

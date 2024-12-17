@@ -21,8 +21,8 @@ const formatTime = (milliseconds) => {
 
 /**
  * Returns the server uptime
- * @param {string} startTime 
- * @returns {string}
+ * @param {number} startTime 
+ * @returns {number}
  */
 const getUptime = (startTime) => {
     const currentTime = Date.now();
@@ -64,10 +64,11 @@ const getWolfText = () => {
 
 /**
  * Shows the startup info
+ * @param {number} startTime
  */
-const getStartup = () => {
+const getStartup = (startTime) => {
     getWolfText();
-    log([`Ver. ${config.version}`, ' | ',`Listening on: ${config.server.host}:${getServerPort()}`, ' | ', `Uptime: ${getUptime(Date.now())}`], [94, 97, 93, 97, 93]);
+    log([`Ver. ${config.version}`, ' | ',`Listening on: ${config.server.host}:${getServerPort()}`, ' | ', `Uptime: ${getUptime(startTime)}`], [94, 97, 93, 97, 93]);
 };
 
 /**

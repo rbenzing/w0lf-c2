@@ -1,4 +1,6 @@
 const { networkInterfaces } = require("node:os");
+const { logError } = require("./logging");
+
 const config = require('./config');
 
 /**
