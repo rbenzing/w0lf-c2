@@ -39,10 +39,10 @@ const server = createServer((socket) => {
                     if (response.download) {
                         await handleDownloadResponse(response);
                     } else {
-                        handleResponse(response);
+                        await handleResponse(response);
                     }
                     
-                    upsertClientSession(sessionId, {waiting: false, buffer: null});
+                    upsertClientSession(sessionId, {waiting: false, buffer: ''});
                 }
             } else {
                 // non-chunk mode

@@ -80,9 +80,7 @@ const handleResponse = async (response) => {
     if (response.response) {
         response = response.response;
     }
-    if (response.download) {
-        await handleDownloadResponse(response);
-    } else if (response.data) {
+    if (response.data) {
         let data = response.data;
         if (data.type === "Buffer") {
             // handle buffer response
@@ -176,12 +174,12 @@ const handleCommandWithArgs = async (command, properties, readline) => {
                     default:
                         logInfo('Invalid command. Type "help" to see available commands.');
                 }
+                prompt();
             }
         } else {
             logInfo('Invalid command. Type "help" to see available commands.');
+            prompt();
         }
-
-        prompt();
     } catch (error) {
         logError(`Exception: ${error.message}`);
     }

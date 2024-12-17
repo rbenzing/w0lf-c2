@@ -305,10 +305,13 @@ const parseAction = async (action) => {
             await runWebcamClip();
             return;
         }
-        const result = await runCommand(command, payload);
-        if (result.includes("download")) {
-            await sendCommand({ response: JSON.parse(result)});
-        } else {
+        let result = await runCommand(command, payload);
+        try {
+            result = JSON.parse(result);
+            if (result.download) {
+                await sendCommand({ response: result});
+            }
+        } catch (e) {
             await sendCommand({ response: { data: result }});
         }
     } catch(err) {
