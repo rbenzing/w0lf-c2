@@ -5,8 +5,6 @@ const { getLoadedPlugins } = require('./plugins');
 
 const config = require('./config');
 
-var startTime = null;
-
 /**
  * Returns the formatted uptime in hours, minutes and seconds
  * @param {number} milliseconds 

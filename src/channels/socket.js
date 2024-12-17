@@ -28,7 +28,6 @@ const server = createServer((socket) => {
             if (payloadStr.length >= config.data.chunk_size || payloadStr.includes('--FIN--')) {
                 // chunk mode                            
                 upsertClientSession(sessionId, {waiting: true, buffer: client.buffer + payloadStr});
-                
                 client = getClient(sessionId);
 
                 if (client.buffer && client.buffer.includes('--FIN--')) {

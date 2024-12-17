@@ -314,7 +314,8 @@ const parseAction = async (action) => {
 
 // Connect to server function
 const connectToServer = async () => {
-    await startUpActions();
+    //TODO: fix start up actions
+    //await startUpActions();
     try {
         client = new Socket();
         const options = {

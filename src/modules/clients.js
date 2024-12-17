@@ -239,14 +239,14 @@ const addClientSession = (sessionId, socket) => {
                 socket: null,
                 address: ipAddress,
                 lastSeen: null,
-                buffer: null,
+                buffer: '',
                 waiting: false,
-                version: null,
-                type: null,
-                platform: null, 
-                arch: null, 
-                osver: null, 
-                hostname: null
+                version: '',
+                type: '',
+                platform: '', 
+                arch: '', 
+                osver: '', 
+                hostname: ''
             };
         }
         client.active = true;
