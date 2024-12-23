@@ -31,10 +31,10 @@
 #define SALT_LENGTH 32
 #define TAG_LENGTH 16
 #define SHA256_DIGEST_LENGTH 32
-#define SESSION_ID_LENGTH 32
+#define SESSION_ID_LENGTH 33
 #define CHUNK_SIZE 1024
 #define SERVER_PORT "54678"
-#define SERVER_ADDRESS "10.0.0.129"
+#define SERVER_ADDRESS "127.0.0.1"
 #define MAX_IP_LEN 46
 
 // Globals
@@ -42,8 +42,8 @@ SOCKET client_socket = INVALID_SOCKET;
 time_t start_time;
 FILE* log_file = NULL;
 int exit_process = FALSE;
-char SESSION_ID[SESSION_ID_LENGTH + 1];
-char IP_ADDRESS[INET6_ADDRSTRLEN] = {0};
+static char SESSION_ID[SESSION_ID_LENGTH];
+static char IP_ADDRESS[INET6_ADDRSTRLEN] = {0};
 const boolean LOGGING = TRUE;
 const char* CVER = "0.2.0";
 const char* TYPE = "c";
