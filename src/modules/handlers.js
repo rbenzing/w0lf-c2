@@ -17,7 +17,7 @@ const writeFile_promise = promisify(writeFile);
 const config = require('./config');
 
 const DOWNLOAD_PATH = join(__dirname, '../', config.path.downloads);
-console.log('download path', DOWNLOAD_PATH);
+
 /**
  * Beacon handler
  * @param {BeaconResponse} response 
