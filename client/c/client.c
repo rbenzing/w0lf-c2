@@ -30,14 +30,10 @@ void log_it(const char* format, ...) {
     va_end(args);
 }
 
-int get_session_id(const char *ip_address) {
-    if (!ip_address) {
-        log_it("Invalid input provided");
-        return -1;
-    }
+int get_session_id() {
 
     char ipAddressBuffer[MAX_IP_LEN + 1];
-    snprintf(ipAddressBuffer, sizeof(ipAddressBuffer), "%s", ip_address);
+    snprintf(ipAddressBuffer, sizeof(ipAddressBuffer), "%s", IP_ADDRESS);
 
     // Remove port if present
     char *port_pos = strstr(ipAddressBuffer, ":" SERVER_PORT);
@@ -70,18 +66,22 @@ int get_session_id(const char *ip_address) {
     }
 
     // Prepare hash input
-    char hash_input[MAX_IP_LEN + 13];  // Extra space for "<>" and sum
+    char hash_input[MAX_IP_LEN + 14];  // Extra space for "<>" and sum
     snprintf(hash_input, sizeof(hash_input), "%s<>%d", ipAddressBuffer, sum);
 
     // Compute SHA256 hash
     unsigned char hash[SHA256_DIGEST_LENGTH];
+
+#if OPENSSL_VERSION_NUMBER >= 0x030000000  // 3.0.0
+
+    EVP_Digest((const unsigned char *)(hash_input), strlen(hash_input), hash, NULL, EVP_sha256(), NULL);
+#else
+
     SHA256_CTX ctx;
-    if (!SHA256_Init(&ctx) || 
-        !SHA256_Update(&ctx, (unsigned char*)hash_input, strlen(hash_input)) || 
-        !SHA256_Final(hash, &ctx)) {
-        log_it("SHA256 computation failed");
-        return -1;
-    }
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, (unsigned char*)hash_input, strlen(hash_input));
+    SHA256_Final(hash, &ctx);
+#endif
 
     // Convert hash to hex and truncate to 32 characters
     for (int i = 0; i < 16; i++) {
@@ -848,7 +848,7 @@ int connect_to_server() {
     setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
     // Generate and store session ID
-    int sessionStatus = get_session_id(IP_ADDRESS, SESSION_ID, sizeof(SESSION_ID));
+    int sessionStatus = get_session_id();
     if (sessionStatus < 0) {
         log_it("Unable to get a session ID.");
         return -1;
