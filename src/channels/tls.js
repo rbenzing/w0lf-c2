@@ -22,8 +22,6 @@ if (!existsSync(certificatekey)) {
     throw new Error("Missing certificate key.");
 }
 
-
-
 // Create the TLS server
 const server = tls.createServer({
     key: readFileSync(certificatekey),

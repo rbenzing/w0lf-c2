@@ -4,10 +4,27 @@ const fs = require('node:fs');
 const { logInfo, logError } = require('../modules/logging');
 const config = require('../modules/config');
 
+const certPath = path.join(__dirname, `../${config.path.certificates}`);
+
+if (!existsSync(certPath)) {
+    mkdirSync(certPath);
+}
+
+const certificate = path.join(certPath, config.channels.tls.cert.cert);
+const certificatekey = path.join(certPath, config.channels.tls.cert.key);
+
+if (!existsSync(certificate)) {
+    throw new Error("Missing certificate.");
+}
+
+if (!existsSync(certificatekey)) {
+    throw new Error("Missing certificate key.");
+}
+
 // Create the HTTP/2 secure server
 const server = http2.createSecureServer({
-    key: fs.readFileSync(path.join(__dirname, 'server.key')),
-    cert: fs.readFileSync(path.join(__dirname, 'server.cert')),
+    key: fs.readFileSync(certificatekey),
+    cert: fs.readFileSync(certificate),
 });
 
 server.on('stream', async (stream, headers) => {
