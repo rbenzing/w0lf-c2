@@ -98,9 +98,7 @@ server.on('stream', async (stream, headers) => {
  * Starts listening on the HTTP/2 server
  */
 const listenHTTP2Server = () => {
-    server.listen(config.channels.http2.port, config.server.host, () => {
-        logInfo(`\nServer is listening on https://${config.server.host}:${config.channels.http2.port}`);
-    });
+    server.listen(config.channels.http2.port, config.server.host);
 
     server.on('error', (err) => {
         logError(`\nServer threw an error: ${err.message}`);
