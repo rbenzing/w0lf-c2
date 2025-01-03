@@ -2,30 +2,23 @@
   "version": "0.3.1",
   "server": {
     "host": "127.0.0.1",
-    "method": "tcp"
+    "method": "tls"
   },
   "channels": {
     "tcp": {
       "port": 54678
     },
-    "https": {
-      "port": 443,
-      "cert": {
-        "key": "server.key",
-        "cert": "server.cert"
-      }
-    },
     "http2": {
       "port": 80,
       "cert": {
-        "key": "server.key",
-        "cert": "server.cert"
+        "key": "server-key.pem",
+        "cert": "server-cert.pem"
       }
     },
     "tls": {
       "cert": {
-        "key": "server.key",
-        "cert": "server.cert"
+        "key": "server-key.pem",
+        "cert": "server-cert.pem"
       },
       "port": 443,
       "version": "TLSv1.2",
@@ -56,7 +49,8 @@
     "downloads": "downloads",
     "plugins": "plugins",
     "logs": "logs",
-    "clientdb": "config"
+    "config": "config",
+    "certificates": "certs"
   },
   "rateLimit": {
     "maxRequests": 100,

@@ -16,7 +16,7 @@ const activeClients = new Map();
 
 let activeClientSessionId = null; // active client session ID
 
-const CLIENTDB_PATH = join(__dirname, "../", config.path.clientdb, '/client.db');
+const CLIENTDB_PATH = join(__dirname, "../", config.path.config, '/client.db');
 
 /**
  * Publishes the clients to the file db

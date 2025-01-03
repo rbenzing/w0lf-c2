@@ -1,17 +1,38 @@
 const tls = require('node:tls');
-const fs = require('node:fs');
+const { readFileSync, existsSync, mkdirSync } = require('node:fs');
 const path = require('node:path');
 const { logInfo, logError } = require('../modules/logging');
 const config = require('../modules/config');
+const constants = require('node:constants');
+
+const certPath = path.join(__dirname, `../${config.path.certificates}`);
+
+if (!existsSync(certPath)) {
+    mkdirSync(certPath);
+}
+
+const certificate = path.join(certPath, config.channels.tls.cert.cert);
+const certificatekey = path.join(certPath, config.channels.tls.cert.key);
+
+if (!existsSync(certificate)) {
+    throw new Error("Missing certificate.");
+}
+
+if (!existsSync(certificatekey)) {
+    throw new Error("Missing certificate key.");
+}
+
+
 
 // Create the TLS server
 const server = tls.createServer({
-    key: fs.readFileSync(path.join(__dirname, config.channels.tls.cert.key)),
-    cert: fs.readFileSync(path.join(__dirname, config.channels.tls.cert.cert)),
+    key: readFileSync(certificatekey),
+    cert: readFileSync(certificate),
+    sessionTimeout: undefined,
     ciphers: config.channels.tls.ciphers,
     honorCipherOrder: true,
     minVersion: config.channels.tls.version, // Minimum TLS version
-    secureOptions: tls.constants.SSL_OP_NO_SSLv2 | tls.constants.SSL_OP_NO_SSLv3 | tls.constants.SSL_OP_NO_COMPRESSION, // Disable SSLv2, SSLv3, and compression
+    secureOptions: constants.SSL_OP_NO_SSLv2 | constants.SSL_OP_NO_SSLv3 | constants.SSL_OP_NO_COMPRESSION // Disable SSLv2, SSLv3, and compression
 }, (socket) => {
     const { getSessionId } = require('../modules/encdec');
     const { addClientSession } = require('../modules/clients');
@@ -100,9 +121,7 @@ const server = tls.createServer({
  * Starts listening on the TLS server
  */
 const listenTLSServer = () => {
-    server.listen(config.channels.tls.port, config.server.host, () => {
-        logInfo(`\nServer is listening on tls://${config.server.host}:${config.channels.tls.port}`);
-    });
+    server.listen(config.channels.tls.port, config.server.host);
 
     server.on('error', (err) => {
         logError(`\nServer threw an error: ${err.message}`);

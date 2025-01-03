@@ -17,7 +17,7 @@ const getServerPort = () => {
             port = config.channels.http2.port;
             break;
         case 'tls':
-            port = config.channels.https.port;
+            port = config.channels.tls.port;
             break;
         case 'udp':
             port = config.channels.udp.port;
