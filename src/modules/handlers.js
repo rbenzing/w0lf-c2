@@ -96,7 +96,7 @@ const handleResponse = async (response) => {
         logInfo(response.message);
     } else if (response.error) {
         logError(response.error);
-    }
+    } else if (response.beacon)
     prompt();
 };
 

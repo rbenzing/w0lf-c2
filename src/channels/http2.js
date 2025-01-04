@@ -1,6 +1,6 @@
 const http2 = require('node:http2');
 const path = require('node:path');
-const fs = require('node:fs');
+const { readFileSync, existsSync, mkdirSync } = require('node:fs');
 const { logInfo, logError } = require('../modules/logging');
 const config = require('../modules/config');
 
@@ -23,8 +23,8 @@ if (!existsSync(certificatekey)) {
 
 // Create the HTTP/2 secure server
 const server = http2.createSecureServer({
-    key: fs.readFileSync(certificatekey),
-    cert: fs.readFileSync(certificate),
+    key: readFileSync(certificatekey),
+    cert: readFileSync(certificate),
 });
 
 server.on('stream', async (stream, headers) => {
