@@ -1,4 +1,4 @@
-# C2 Server
+# W0lf C2 Server
 
 - **Author**: Russell Benzing
 - **Last Updated**: 12/14/2024
@@ -28,6 +28,9 @@ I tried to make the installation process as simple as possible
    git clone <repository_url>
    cd w0lf-c2
    npm install
+
+3. **Configuration**
+   Make sure you look at config/config.json and choose the method you want the server to use, tcp socket is the default.
 
 3. **Running**:
    ```bash
