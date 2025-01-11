@@ -5,8 +5,6 @@ const { getLoadedPlugins } = require('./plugins');
 
 const config = require('./config');
 
-var startTime = null;
-
 /**
  * Returns the formatted uptime in hours, minutes and seconds
  * @param {number} milliseconds 
@@ -23,8 +21,8 @@ const formatTime = (milliseconds) => {
 
 /**
  * Returns the server uptime
- * @param {string} startTime 
- * @returns {string}
+ * @param {number} startTime 
+ * @returns {number}
  */
 const getUptime = (startTime) => {
     const currentTime = Date.now();
@@ -66,10 +64,10 @@ const getWolfText = () => {
 
 /**
  * Shows the startup info
+ * @param {number} startTime
  */
-const getStartup = () => {
+const getStartup = (startTime) => {
     getWolfText();
-    startTime = Date.now();
     log([`Ver. ${config.version}`, ' | ',`Listening on: ${config.server.host}:${getServerPort()}`, ' | ', `Uptime: ${getUptime(startTime)}`], [94, 97, 93, 97, 93]);
 };
 

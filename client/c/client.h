@@ -11,6 +11,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <wincodec.h>
+#include <openssl/bio.h>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -18,13 +19,13 @@
 #include <openssl/buffer.h>
 #include <openssl/err.h>
 
-// #pragma comment(lib, "ws2_32.lib")
-// #pragma comment(lib, "libssl.lib")
-// #pragma comment(lib, "libcrypto.lib")
-// #pragma comment(lib, "ole32.lib")
-// #pragma comment(lib, "oleaut32.lib")
-// #pragma comment(lib, "gdi32.lib")
-// #pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "libssl.lib")
+#pragma comment(lib, "libcrypto.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "windowscodecs.lib")
 
 #define KEY_LENGTH 32
 #define IV_LENGTH 12
@@ -34,7 +35,7 @@
 #define SESSION_ID_LENGTH 32
 #define CHUNK_SIZE 1024
 #define SERVER_PORT "54678"
-#define SERVER_ADDRESS "10.0.0.129"
+#define SERVER_ADDRESS "localhost"
 #define MAX_IP_LEN 46
 
 // Globals
@@ -42,8 +43,8 @@ SOCKET client_socket = INVALID_SOCKET;
 time_t start_time;
 FILE* log_file = NULL;
 int exit_process = FALSE;
-char SESSION_ID[SESSION_ID_LENGTH + 1];
-char IP_ADDRESS[INET6_ADDRSTRLEN] = {0};
+static char SESSION_ID[SESSION_ID_LENGTH + 1];
+static char IP_ADDRESS[INET6_ADDRSTRLEN] = {0};
 const boolean LOGGING = TRUE;
 const char* CVER = "0.2.0";
 const char* TYPE = "c";
@@ -68,7 +69,7 @@ static const int base64_invs[] = { 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 5
 
 // Function prototypes
 void log_it(const char* format, ...);
-int get_session_id(const char *ip_address, char *session_id, size_t session_id_size);
+int get_session_id();
 char* base64_encode(const unsigned char *data, size_t length);
 unsigned char* base64_decode(const char *data, size_t *length);
 char* encrypt_data(const char *data, const char *shared_key);

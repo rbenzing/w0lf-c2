@@ -48,5 +48,5 @@
         type: String,
         description: String,
         commands: Command[]
-    }} Plugin
+    }} Pluggable
  */

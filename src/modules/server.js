@@ -2,10 +2,11 @@ const { logInfo, createLogStream, endLogStream } = require('./logging');
 const { getHowel, getStartup } = require('./helpers');
 const { loadAndRegisterPlugins } = require('./plugins');
 const { clearActiveSession, endClientSessions } = require('./clients');
-const { closeSocketServer } = require('../channels/socket');
 const { prompt, listenServerConsole } = require('./readline');
 
 const config = require('./config');
+
+const startTime = Date.now();
 
 /**
  * Starts the server
@@ -21,16 +22,16 @@ const startServer = async () => {
             listenSocketServer();
             break;
         case "tls":
-            const { startTLSServer } = require('../channels/tls');
-            startTLSServer();
+            const { listenTLSServer } = require('../channels/tls');
+            listenTLSServer();
             break;
         case "http2":
-            const { startHTTP2Server } = require('../channels/http2');
-            startHTTP2Server();
+            const { listenHTTP2Server } = require('../channels/http2');
+            listenHTTP2Server();
             break;
         case "udp":
-            const { startUDPServer } = require('../channels/udp');
-            startUDPServer();
+            const { listenUDPServer } = require('../channels/udp');
+            listenUDPServer();
             break;
         default:
             shutdown();
@@ -38,7 +39,7 @@ const startServer = async () => {
 
     // startup logo and info
     getHowel();
-    getStartup();
+    getStartup(startTime);
 
     // register plugins
     await loadAndRegisterPlugins();
@@ -61,9 +62,12 @@ const closeServer = () => {
     // close server connection
     switch (config.server.method) {
         case "tcp":
+            const { closeSocketServer } = require('../channels/socket');
             closeSocketServer();
             break;
         case "tls":
+            const { closeTLSServer } = require('../channels/tls');
+            closeTLSServer();
             break;
         case "http2":
             break;
@@ -87,5 +91,6 @@ const shutdown = () => {
 module.exports = {
     closeServer,
     shutdown,
-    startServer
+    startServer,
+    startTime
 };

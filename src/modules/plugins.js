@@ -41,8 +41,8 @@ const loadAndRegisterPlugins = async () => {
 
 /**
  * Registers a plugin in the server config
- * @param {Plugin} plugin 
- * @returns Plugin
+ * @param {Pluggable} plugin 
+ * @returns Pluggable
  */
 const registerPlugin = (plugin) => {
     try {

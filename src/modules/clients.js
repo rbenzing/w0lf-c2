@@ -16,7 +16,7 @@ const activeClients = new Map();
 
 let activeClientSessionId = null; // active client session ID
 
-const CLIENTDB_PATH = join(__dirname, "../", config.path.clientdb, '/client.db');
+const CLIENTDB_PATH = join(__dirname, "../", config.path.config, '/client.db');
 
 /**
  * Publishes the clients to the file db
@@ -239,14 +239,14 @@ const addClientSession = (sessionId, socket) => {
                 socket: null,
                 address: ipAddress,
                 lastSeen: null,
-                buffer: null,
+                buffer: '',
                 waiting: false,
-                version: null,
-                type: null,
-                platform: null, 
-                arch: null, 
-                osver: null, 
-                hostname: null
+                version: '',
+                type: '',
+                platform: '', 
+                arch: '', 
+                osver: '', 
+                hostname: ''
             };
         }
         client.active = true;
