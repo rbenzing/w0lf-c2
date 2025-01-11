@@ -1,8 +1,8 @@
 {
-  "version": "0.3.1",
+  "version": "0.3.3",
   "server": {
-    "host": "127.0.0.1",
-    "method": "tls"
+    "host": "localhost",
+    "method": "tcp"
   },
   "channels": {
     "tcp": {
