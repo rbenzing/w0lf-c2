@@ -35,7 +35,7 @@
 #define SESSION_ID_LENGTH 32
 #define CHUNK_SIZE 1024
 #define SERVER_PORT "54678"
-#define SERVER_ADDRESS "127.0.0.1"
+#define SERVER_ADDRESS "localhost"
 #define MAX_IP_LEN 46
 
 // Globals
