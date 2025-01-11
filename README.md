@@ -1,7 +1,7 @@
 # W0lf C2 Server
 
 - **Author**: Russell Benzing
-- **Last Updated**: 12/14/2024
+- **Last Updated**: 01/11/2025
 - **License**: GPL-3.0
 
 ## Overview
